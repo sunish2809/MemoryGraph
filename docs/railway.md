@@ -8,16 +8,17 @@ this GitHub repo. Only **frontend** should have a public URL.
 You connected GitHub to **one** service whose root is `/`. Railpack then looks at the
 whole repo (`Backend/`, `Frontend/`, `faces/`) and finds no single language.
 
-Do **not** add a `start.sh` at the repo root. Fix the service instead:
+Do **not** add a `start.sh` at the repo root. Do **not** set Root Directory to `Backend`
+(that made `COPY docker-entrypoint.sh` fail, because Railway’s context is still the repo root).
 
-1. Open the failed service → **Settings**.
-2. **Root Directory** = one of `Backend`, `Frontend`, or `faces` (not `/`).
-3. **Builder** = **Dockerfile** (not Railpack). We already have a `Dockerfile` in each of those folders.
-4. **Config as code** path (optional): `/Backend/railway.toml`, `/Frontend/railway.toml`, or `/faces/railway.toml`.
-
-Then create the **other** services the same way. You need four services total, not one.
-
-A “Deploy from repo” button that points at `sunish2809/MemoryGraph` with no root directory will always fail this way.
+1. Open the service → **Settings**.
+2. **Root Directory** = `/` (the repository root). Leave it empty if that is the default.
+3. **Builder** = **Dockerfile**.
+4. Pick the file that matches **this** service:
+   - backend → `/Backend/Dockerfile`
+   - frontend → `/Frontend/Dockerfile`
+   - faces → `/faces/Dockerfile`
+5. Redeploy (wait for GitHub `main` to include the `Backend/` prefixed COPY paths).
 
 You need pgvector (for search embeddings). Railway’s one-click Postgres plugin is plain
 Postgres — do **not** use it.
@@ -27,9 +28,9 @@ Postgres — do **not** use it.
 | Railway service name | Source | Public? | Volume mount |
 | --- | --- | --- | --- |
 | `postgres` | Docker image `pgvector/pgvector:pg17` | no | `/var/lib/postgresql/data` |
-| `faces` | repo, root directory `faces` | no | `/models` |
-| `backend` | repo, root directory `Backend` | no | `/var/lib/memorygraph/storage` |
-| `frontend` | repo, root directory `Frontend` | **yes** | none |
+| `faces` | repo + `/faces/Dockerfile` (root `/`) | no | `/models` |
+| `backend` | repo + `/Backend/Dockerfile` (root `/`) | no | `/var/lib/memorygraph/storage` |
+| `frontend` | repo + `/Frontend/Dockerfile` (root `/`) | **yes** | none |
 
 Name them exactly like this so the private hostnames below match.
 
@@ -52,7 +53,7 @@ Backend 1 GB, Postgres 512 MB, frontend 256 MB is enough for a handful of tester
 
 ## 2. Faces
 
-1. New service from the GitHub repo, **Root Directory** = `faces`
+1. New service from the GitHub repo, Dockerfile `/faces/Dockerfile`, Root Directory `/`
 2. Variables:
 
    ```
@@ -68,7 +69,7 @@ First deploy downloads InsightFace weights (several hundred MB) and can take a f
 
 ## 3. Backend
 
-1. New service from the same repo, **Root Directory** = `Backend`
+1. New service from the same repo, Dockerfile `/Backend/Dockerfile`, Root Directory `/`
 2. Volume → `/var/lib/memorygraph/storage` (photos live here; without it they vanish on redeploy)
 3. Variables (Reference the other services where noted):
 
@@ -107,7 +108,7 @@ Google Cloud).
 
 ## 4. Frontend
 
-1. New service from the repo, **Root Directory** = `Frontend`
+1. New service from the repo, Dockerfile `/Frontend/Dockerfile`, Root Directory `/`
 2. Variables:
 
    ```

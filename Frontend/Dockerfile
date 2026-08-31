@@ -1,15 +1,16 @@
+# Build context is the repository root (Railway and Compose both send `.`).
 FROM node:24-alpine AS build
 WORKDIR /build
 
-COPY package.json package-lock.json ./
+COPY Frontend/package.json Frontend/package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY Frontend/ .
 RUN npm run build
 
 FROM nginx:1.29-alpine AS runtime
 # Official image runs envsubst on /etc/nginx/templates/*.template at start.
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY Frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /build/dist /usr/share/nginx/html
 
 # Only these names are substituted so nginx's $host / $scheme stay intact.

@@ -1,0 +1,11 @@
+.git
+**/.DS_Store
+Backend/target
+Frontend/node_modules
+Frontend/dist
+faces/__pycache__
+*.md
+docs
+.env
+.env.*
+!.env.example

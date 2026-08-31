@@ -1,8 +1,7 @@
-# Point Railway Config-as-code at /Frontend/railway.toml
-# and set this service's Root Directory to Frontend (not /).
+# Leave Root Directory as / (the repo root). Railway already sends `.` as context.
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
+dockerfilePath = "Frontend/Dockerfile"
 watchPatterns = ["/Frontend/**"]
 
 [deploy]

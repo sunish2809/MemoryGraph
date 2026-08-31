@@ -22,7 +22,8 @@ services:
 
   backend:
     build:
-      context: ./Backend
+      context: .
+      dockerfile: Backend/Dockerfile
     environment:
       DATABASE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-memorygraph}
       DATABASE_USERNAME: ${POSTGRES_USER:-memorygraph}
@@ -78,7 +79,8 @@ services:
 
   faces:
     build:
-      context: ./faces
+      context: .
+      dockerfile: faces/Dockerfile
     ports:
       - '${FACES_PORT:-8090}:8090'
     volumes:
@@ -93,7 +95,8 @@ services:
 
   frontend:
     build:
-      context: ./Frontend
+      context: .
+      dockerfile: Frontend/Dockerfile
     environment:
       PORT: 80
       BACKEND_HOST: backend

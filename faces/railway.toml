@@ -1,8 +1,7 @@
-# Point Railway Config-as-code at /faces/railway.toml
-# and set this service's Root Directory to faces (not /).
+# Leave Root Directory as / (the repo root). Railway already sends `.` as context.
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
+dockerfilePath = "faces/Dockerfile"
 watchPatterns = ["/faces/**"]
 
 [deploy]

@@ -1,3 +1,4 @@
+# Build context is the repository root (Railway and Compose both send `.`).
 FROM python:3.11-slim-bookworm
 
 RUN apt-get update \
@@ -10,10 +11,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY faces/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
+COPY faces/app ./app
 
 ENV INSIGHTFACE_HOME=/models
 RUN mkdir -p /models
