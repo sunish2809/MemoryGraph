@@ -1,0 +1,780 @@
+# MemoryGraph
+
+A private, searchable memory of your life. Import photos, notes, conversations, documents and
+recordings; MemoryGraph normalises them into a single timeline of **memories** you can search
+semantically and ask questions about in plain language.
+
+> **Status: Phase 7–10 largely done.** Upload photos, audio and video; WhatsApp + Google Photos
+> (Takeout and Picker); Places with reverse-geocoded names, rename/merge, and a map; Trips as a
+> named stretch of days; Ask with sources; free local face detection (InsightFace) with confirm/tag
+> UI; Privacy page with export and account wipe.
+
+## Contents
+
+- [Architecture](#architecture)
+- [Project structure](#project-structure)
+- [Database schema](#database-schema)
+- [Media storage](#media-storage)
+- [Asynchronous processing](#asynchronous-processing)
+- [Search](#search)
+- [Ask](#ask)
+- [Imports](#imports)
+- [API](#api)
+- [Running the project](#running-the-project)
+- [Beta testing](#beta-testing)
+- [Free hosting](#free-hosting)
+- [Backing up](#backing-up)
+- [Testing](#testing)
+- [Roadmap](#roadmap)
+
+## Architecture
+
+A **modular monolith**: one deployable Spring Boot application, internally split into feature
+modules that each own their controllers, application services, domain and persistence. Modules
+communicate through their public services, never by reaching into another module's repositories, so
+a module can be extracted into a separate service later without redesigning it.
+
+```
+Browser (React + Vite)
+        │  relative /api/v1 calls
+        ▼
+nginx  (serves the SPA, proxies /api to the backend — one origin, no CORS)
+        ▼
+Spring Boot REST API
+        │  controllers → application services → domain → repositories
+        │
+        ├──▶ PostgreSQL + pgvector          memories, embeddings, full-text index, jobs
+        │
+        ├──▶ Object storage                 the files themselves, never in the database
+        │
+        └──▶ Processing workers             metadata + embeddings after the response is sent
+```
+
+Layering inside a module:
+
+| Layer | Package | Responsibility |
+| --- | --- | --- |
+| API | `<module>.api` | HTTP mapping, request/response DTOs, validation. No business logic. |
+| Application | `<module>.application` | Use cases, transactions, orchestration. |
+| Domain | `<module>.domain` | Entities, invariants, repository interfaces. |
+| Infrastructure | e.g. `auth.security` | Adapters to frameworks and external systems. |
+
+Cross-cutting concerns live in `common`: the response envelope, the error-to-HTTP mapping, request
+correlation, and validated configuration properties.
+
+Decisions and their trade-offs are recorded in [`docs/adr`](docs/adr).
+
+## Project structure
+
+```
+MemoryGraph/
+├── docker-compose.yml          Postgres + backend + frontend
+├── .env.example                Every environment variable, documented
+├── docs/adr/                   Architecture decision records
+├── Backend/
+│   ├── Dockerfile              Multi-stage: Maven build → JRE runtime, non-root
+│   └── src/main/
+│       ├── java/com/memorygraph/backend/
+│       │   ├── common/         api envelope + paging, error handling, config, logging, time
+│       │   ├── auth/           api, application, security (JWT, filter, rules)
+│       │   ├── user/           User entity and repository
+│       │   ├── memory/         the core module
+│       │   │   ├── api/        memories, media, timeline, search, ask, imports, people + DTOs
+│       │   │   ├── application/
+│       │   │   │   ├── upload/     type detection, size and filename validation, EXIF
+│       │   │   │   ├── imports/    WhatsApp export parse + async import jobs
+│       │   │   │   └── processing/ jobs, claiming, retries, processors
+│       │   │   ├── search/     hybrid / full-text / semantic MemorySearcher
+│       │   │   └── domain/     Memory, MediaAsset, ConversationMessage, Person, jobs, repositories
+│       │   ├── ai/             embeddings, RAG ask, captions, answer generators
+│       │   ├── storage/        StorageService abstraction + local filesystem
+│       │   └── health/         public liveness endpoint
+│       └── resources/
+│           ├── application.yml
+│           └── db/migration/   Flyway migrations
+└── Frontend/
+    ├── Dockerfile              Multi-stage: Vite build → nginx
+    ├── nginx.conf              SPA fallback + /api proxy
+    └── src/
+        ├── components/         layout, routing guards, UI primitives
+        ├── features/           auth, dashboard, memories, timeline, search, people, import, ask, system
+        ├── lib/                API client, session storage, query client, formatting
+        └── types/              API contract types
+```
+
+## Database schema
+
+Owned entirely by Flyway (`Backend/src/main/resources/db/migration`). Hibernate runs with
+`ddl-auto: validate` and never modifies the schema.
+
+**`users`**
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key, generated by the application |
+| `email` | `varchar(320)` | Unique on `lower(email)` |
+| `password_hash` | `varchar(100)` | Algorithm-prefixed, currently bcrypt |
+| `display_name` | `varchar(120)` | |
+| `enabled` | `boolean` | Disabling an account revokes access on the next request |
+| `created_at` / `updated_at` | `timestamptz` | |
+
+**`memories`** — the central entity
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key |
+| `user_id` | `uuid` | `→ users(id) ON DELETE CASCADE` |
+| `type` | `varchar(32)` | `TEXT`, `PHOTO`, `VIDEO`, `AUDIO`, `DOCUMENT`, `CONVERSATION`, `EVENT` |
+| `source` | `varchar(32)` | `MANUAL`, `UPLOAD`, `IMPORT` |
+| `title` | `varchar(255)` | |
+| `description` | `text` | |
+| `content` | `text` | Normalised searchable text: note body, caption + OCR, transcript |
+| `occurred_at` | `timestamptz` | When the memory *happened*; drives the timeline |
+| `processing_status` | `varchar(32)` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `SKIPPED` |
+| `search_vector` | `tsvector` | Generated from title, description and content; never written by the application |
+| `embedding` | `vector(1536)` | Written by the embedding job via JDBC; not mapped on the JPA entity |
+| `occurred_at_locked` | `boolean` | When true, EXIF must not overwrite `occurred_at` |
+| `created_at` / `updated_at` | `timestamptz` | |
+
+Indexes: `(user_id, occurred_at DESC)` for the timeline, `(user_id, type, occurred_at DESC)` for
+type-filtered views, a GIN index on `search_vector` for full-text search, an HNSW index on
+`embedding` for cosine nearest-neighbour, and a partial index on unfinished `processing_status`
+values so the async processor never scans completed memories.
+
+`search_vector` is a generated `tsvector` column, weighted so a word in the title ranks above the
+same word in the body. PostgreSQL maintains it; the application never writes it. User input is
+parsed by `memory_search_query(text)`: unquoted words match by prefix, quoted text matches as a
+phrase. See [Search](#search) and [ADR 0010](docs/adr/0010-postgres-full-text-search.md).
+
+**`media_assets`** — the file behind a memory
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key |
+| `memory_id` | `uuid` | `→ memories(id) ON DELETE CASCADE` |
+| `storage_key` | `varchar(512)` | Location in object storage; unique |
+| `file_name` | `varchar(255)` | The name on the user's device — displayed, never used as a path |
+| `mime_type` | `varchar(127)` | Determined from the file's bytes, not from the request |
+| `size_bytes` | `bigint` | |
+| `checksum` | `varchar(64)` | SHA-256 of the stored bytes; also served as the `ETag` |
+| `width_px` / `height_px` | `integer` | Filled in by processing, for images |
+| `latitude` / `longitude` | `double` | From EXIF GPS when present |
+| `captured_at` | `timestamptz` | From EXIF DateTimeOriginal when present |
+| `created_at` | `timestamptz` | |
+
+**`processing_jobs`** — asynchronous enrichment
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key |
+| `memory_id` | `uuid` | `→ memories(id) ON DELETE CASCADE` |
+| `user_id` | `uuid` | Denormalised, so jobs are auditable per user without a join |
+| `type` | `varchar(48)` | `MEDIA_METADATA`, `OCR`, `CAPTION`, `EMBEDDING` |
+| `status` | `varchar(32)` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `SKIPPED` |
+| `attempts` / `max_attempts` | `integer` | Retry budget |
+| `next_attempt_at` | `timestamptz` | Moves forward on each failure (backoff) |
+| `started_at` / `finished_at` / `duration_ms` | | How long the attempt took |
+| `error_message` | `text` | Why it failed |
+
+A partial index on `next_attempt_at WHERE status IN ('PENDING','FAILED')` means the sweeper's query
+never looks at finished jobs.
+
+**`import_jobs`** — bulk WhatsApp (and later other) exports
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Assigned by the application before store |
+| `user_id` | `uuid` | `→ users(id) ON DELETE CASCADE` |
+| `kind` | `varchar(32)` | `WHATSAPP` |
+| `status` | `varchar(32)` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
+| `storage_key` | `varchar(512)` | Export bytes in object storage |
+| `checksum` | `varchar(64)` | SHA-256 of chat plaintext; unique per user |
+| `zone` | `varchar(64)` | IANA zone used to interpret message wall-clock times |
+| `chat_name` / `memories_created` | | Filled when the job completes |
+| `error_message` | `text` | |
+
+**`conversation_messages`** — per-message rows for a day-bucket conversation ([ADR 0014](docs/adr/0014-conversation-messages-satellite.md))
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key |
+| `memory_id` | `uuid` | `→ memories(id) ON DELETE CASCADE` |
+| `user_id` | `uuid` | `→ users(id) ON DELETE CASCADE` |
+| `sent_at` | `timestamptz` | Message wall-clock, interpreted with the import zone |
+| `sender_name` / `body` | | As parsed from the export |
+| `sort_index` | `integer` | Order within the day |
+
+**`people`** / **`memory_people`** — people from chat senders ([ADR 0015](docs/adr/0015-people-from-senders.md))
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `people.id` | `uuid` | Primary key |
+| `people.user_id` | `uuid` | `→ users(id) ON DELETE CASCADE` |
+| `people.display_name` | `varchar(255)` | Preferred label |
+| `people.normalized_name` | `varchar(255)` | Lower/stripped; unique with `user_id` |
+| `memory_people` | composite PK | `(memory_id, person_id)` with CASCADE from both |
+
+**`places` / `memory_places` / `place_grid_aliases`** — GPS cells (~1 km) linked to memories
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `places.display_name` | `varchar(255)` | Coordinate fallback, Nominatim label, or a name you set |
+| `places.normalized_key` | `varchar(64)` | Grid cell identity; unique with `user_id` |
+| `places.name_locked` | `boolean` | Manual rename; geocoding will not overwrite |
+| `place_grid_aliases` | composite PK | Extra grid keys after a merge, so the duplicate cell does not come back |
+
+**`trips`** — a named stretch of days; people and places are derived from memories in that window
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key |
+| `user_id` | `uuid` | `→ users(id) ON DELETE CASCADE` |
+| `title` | `varchar(255)` | |
+| `started_at` / `ended_at` | `timestamptz` | Inclusive window |
+
+Enum-like columns are `varchar` **without** a `CHECK` constraint, so new memory types and sources
+ship without a migration.
+
+## Media storage
+
+Files live in object storage; PostgreSQL holds only the metadata pointing at them. Everything goes
+through one interface, `StorageService`, so the backing store is a configuration choice:
+
+```yaml
+memorygraph:
+  storage:
+    backend: LOCAL           # the only implementation today; S3/MinIO is a new class
+    max-file-size: 1536MB
+    local:
+      root: /var/lib/memorygraph/storage
+```
+
+Objects are keyed `users/{userId}/memories/{memoryId}/{random}.{ext}`. The key is always generated — a
+client filename never becomes part of a path, so traversal is impossible rather than merely filtered.
+The prefix also means one person's media can be exported or deleted wholesale.
+
+**Media is streamed by the API, never linked to directly.** `GET /memories/{id}/media/{assetId}`
+authorises the read against the database first, so a private photo is never reachable by whoever holds
+a URL. Because a bearer token cannot travel in an `<img src>`, the frontend fetches images as blobs and
+renders them from object URLs.
+
+Uploads are validated by their leading bytes rather than the declared content type: JPEG, PNG, GIF,
+WebP and HEIC are accepted, anything else gets `415`. See
+[ADR 0009](docs/adr/0009-upload-validation.md) for why, and what that costs.
+
+> Under Docker Compose the storage directory is a named volume. It is as precious as the database
+> volume — losing it loses the photos while leaving rows that point at them.
+
+## Asynchronous processing
+
+An upload responds as soon as the bytes are safe. Enrichment happens afterwards:
+
+```
+POST /memories/upload
+    │
+    ├─ validate → store bytes → save memory + media_asset → create job (PENDING)   ─┐
+    │                                                                                │
+    └─ 201 Created, processingStatus: PENDING  ◀── the user waits only for this      │
+                                                                                     │
+   after commit ─────────────────────────────────────────────────────────────────────┘
+    │
+    ├─ fast path:  event listener claims the job on a bounded worker pool
+    └─ safety net: scheduled sweeper claims anything due — never dispatched,
+                   failed with retries left, or abandoned by a dead worker
+    │
+    └─▶ MEDIA_METADATA: read image dimensions, build searchable text
+        │
+        └─ COMPLETED, or FAILED with an error and a backoff before the next attempt
+```
+
+Jobs are rows, not in-memory tasks, so work survives a restart, can be retried, and is observable per
+user. Claiming uses `SELECT … FOR UPDATE SKIP LOCKED`, so multiple application instances can run
+without coordination. This is also the seam a message broker would slot into — see
+[ADR 0008](docs/adr/0008-asynchronous-processing-pipeline.md).
+
+Text memories are `COMPLETED` for processing status as soon as they are saved, then an `EMBEDDING`
+job runs in the background. Uploads run `MEDIA_METADATA` (dimensions + EXIF + base searchable text),
+then `OCR` (skipped when Tesseract is missing), then `CAPTION` (skipped when no chat model is
+configured), then `EMBEDDING`. Embedding / OCR / caption failure does not mark the memory `FAILED`.
+
+## Search
+
+Finding a memory is a single endpoint, `GET /api/v1/search`. Text, type and date are one question —
+"photos from that trip, some time in 2019" — so they are not split across a search endpoint and a
+browse endpoint. Omit the text and it degrades into a filtered list.
+
+```
+GET /search?q=sikkim&type=PHOTO&from=2019-01-01&to=2019-12-31&zone=Asia/Kolkata
+    │
+    ├─ resolve calendar days in the viewer's zone
+    ├─ parse q: prefix terms by default, exact phrase if quoted
+    ├─ constrain: this user, these types, this window
+    ├─ lexical rank + semantic nearest neighbours (within a distance ceiling)
+    ├─ fuse by reciprocal rank fusion (position, not raw scores)
+    └─ page of memories, each with a highlighted snippet
+```
+
+The searchable form of a memory is a generated `tsvector` column, so it cannot drift from the row it
+describes. Semantic ranking uses the `embedding` column and the same owner / type / date filters.
+The primary `MemorySearcher` is hybrid: full-text is the gate (no lexical hit → empty page), and
+vectors re-rank or boost candidates. Rank is always position in the page — `ts_rank_cd` and cosine
+distance do not share a scale, so they are fused by reciprocal rank fusion.
+
+Unquoted input is prefix-matched, so typing `birth` finds `birthday`. Quoted input is an exact
+phrase. Text with no searchable words (`the`, `!!!`) matches nothing rather than everything. A
+snippet marks the matched words with inert `[[` `]]` markers; the client turns those into its own
+elements, so a stored note is never rendered as HTML.
+
+Date filters use the same timezone rules as the timeline: `from` and `to` are calendar dates in
+`zone`, and a memory recorded at 01:30 in Kolkata belongs to that morning, not to the previous day
+in UTC.
+
+See [ADR 0010](docs/adr/0010-postgres-full-text-search.md) and
+[ADR 0011](docs/adr/0011-embeddings-hybrid-ask.md).
+
+## Ask
+
+`POST /api/v1/ask` answers a question from the caller's memories only: retrieve, then generate.
+Retrieval may keep a semantic-only hit when it clears the distance ceiling (paraphrases). Lexical
+Ask uses OR of content words so "What happened on the Sikkim trip?" is not defeated by verbs that
+never appear in the note. The response always includes the source memories that grounded the answer,
+or an honest "I don't know" when nothing relevant was found.
+
+Without an OpenAI key the stack still boots: a deterministic hasher fills vectors for the pipeline,
+and answers are retrieval-only summaries (`model: retrieval-only`). If a key is set and OpenAI
+refuses (quota, billing, outage), Ask falls back to that same listing instead of returning an error.
+Set `AI_CHAT_PROVIDER=openai`, `AI_EMBEDDING_PROVIDER=openai` and `OPENAI_API_KEY` for real
+embeddings, grounded chat, and photo captions — see [`.env.example`](.env.example). The in-app
+**Privacy** page states which of those are on for this deployment.
+
+## Imports
+
+`POST /api/v1/imports/whatsapp` accepts a WhatsApp `.txt` or `.zip` export plus a `zone`. The server
+stores the file, returns an `import_jobs` handle (`202 Accepted`), and parses asynchronously into
+one `CONVERSATION` memory per chat-day (with `conversation_messages` and people links). Matched
+photos inside a zip become `PHOTO` memories. The same export checksum is not imported twice. See
+[ADR 0012](docs/adr/0012-whatsapp-day-bucket-import.md),
+[ADR 0014](docs/adr/0014-conversation-messages-satellite.md), and
+[ADR 0015](docs/adr/0015-people-from-senders.md).
+
+Photo enrichment details (EXIF, OCR, captions, HEIC) are in
+[ADR 0013](docs/adr/0013-photo-enrichment.md).
+
+## API
+
+All endpoints are versioned under `/api/v1` and return the same envelope:
+
+```json
+{ "success": true, "data": { }, "timestamp": "2026-08-22T09:41:12Z", "requestId": "…" }
+```
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "Request validation failed",
+    "fieldErrors": { "email": "must be a well-formed email address" }
+  },
+  "timestamp": "2026-08-22T09:41:12Z",
+  "requestId": "…"
+}
+```
+
+`error.code` is a stable identifier clients may branch on; `message` is for humans. Every response
+carries an `X-Request-Id` header that appears in the matching server log lines.
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/auth/registration` | public | Whether an invite code is required to register |
+| `POST` | `/api/v1/auth/register` | public | Create an account (`inviteCode` when the server is in closed beta) |
+| `POST` | `/api/v1/auth/login` | public | Exchange credentials for an access token |
+| `GET` | `/api/v1/auth/me` | bearer | Current user's profile |
+| `GET` | `/api/v1/account/privacy` | bearer | Whether data is local, and whether OpenAI / faces are on |
+| `GET` | `/api/v1/account/export` | bearer | Zip of `archive.json` + media (raw bytes, not the envelope) |
+| `DELETE` | `/api/v1/account` | bearer | Wipe this account (`password` + confirmation `DELETE`) |
+| `POST` | `/api/v1/memories/text` | bearer | Create a note; `occurredAt` optional, defaults to now |
+| `POST` | `/api/v1/memories/upload` | bearer | Multipart upload; `file` plus optional `title`, `description`, `occurredAt` |
+| `GET` | `/api/v1/memories` | bearer | Paginated list, newest first (`page`, `size`) |
+| `GET` | `/api/v1/memories/stats` | bearer | Total memories, earliest occurrence, people count |
+| `GET` | `/api/v1/memories/{id}` | bearer | One memory in full, with media; conversations include `messages[]` |
+| `PATCH` | `/api/v1/memories/{id}` | bearer | Correct title, caption/`content`, and `occurredAt` (locks the date) |
+| `DELETE` | `/api/v1/memories/{id}` | bearer | Delete the memory, its metadata and its files |
+| `GET` | `/api/v1/memories/{id}/media/{assetId}` | bearer | Stream the stored file (raw bytes, not the envelope) |
+| `GET` | `/api/v1/timeline` | bearer | Memories grouped by day (`from`, `to`, `zone`, `page`, `size`) |
+| `GET` | `/api/v1/search` | bearer | Hybrid search + type/date/`personId` (`q`, `type`, `from`, `to`, `zone`, `sort`, `page`, `size`) |
+| `POST` | `/api/v1/ask` | bearer | Question answering with source memories (`question`, optional `type` / date / `zone`) |
+| `POST` | `/api/v1/imports/whatsapp` | bearer | Multipart WhatsApp `.txt`/`.zip` + `zone`; returns import job |
+| `POST` | `/api/v1/imports/google-photos` | bearer | Multipart Google Takeout Photos `.zip` + `zone` |
+| `GET` | `/api/v1/integrations/google` | bearer | Google Photos Picker config/connection status |
+| `GET` | `/api/v1/integrations/google/authorize` | bearer | OAuth URL for Photos Picker |
+| `POST` | `/api/v1/integrations/google/callback` | bearer | Exchange OAuth `code` + `state` |
+| `DELETE` | `/api/v1/integrations/google` | bearer | Disconnect Google |
+| `POST` | `/api/v1/imports/google-photos/picker/sessions` | bearer | Start Photos Picker session |
+| `GET` | `/api/v1/imports/google-photos/picker/sessions/{id}` | bearer | Poll until selection complete |
+| `POST` | `/api/v1/imports/google-photos/picker/sessions/{id}/import` | bearer | Import picked media (`zone`) |
+| `GET` | `/api/v1/imports/{id}` | bearer | Import job status |
+| `GET` | `/api/v1/people` | bearer | People with memory counts |
+| `GET` | `/api/v1/people/graph` | bearer | People nodes + co-occurrence edges |
+| `GET` | `/api/v1/people/{id}` | bearer | Person plus photo gallery and recent non-photo memories |
+| `PATCH` | `/api/v1/people/{id}` | bearer | Rename (`displayName`); conflict if that name already exists |
+| `POST` | `/api/v1/people/{id}/merge` | bearer | Merge `sourcePersonId` into this person |
+| `POST` | `/api/v1/memories/{id}/people` | bearer | Tag memory with person (`displayName`) |
+| `DELETE` | `/api/v1/memories/{id}/people/{personId}` | bearer | Untag person from memory |
+| `POST` | `/api/v1/memories/{id}/faces/{faceId}/confirm` | bearer | Confirm face as person (`personId` or `displayName`) |
+| `DELETE` | `/api/v1/memories/{id}/faces/{faceId}` | bearer | Clear a confirmed face name (suggestion remains for retag) |
+| `GET` | `/api/v1/faces/review` | bearer | Unlabeled faces grouped into unknown-person clusters |
+| `POST` | `/api/v1/faces/{faceId}/reject-suggestion` | bearer | Dismiss “Looks like…” without naming the face |
+| `POST` | `/api/v1/faces/{faceId}/ignore` | bearer | Skip labeling a background / crowd face; drops it from Faces |
+| `POST` | `/api/v1/faces/{faceId}/restore` | bearer | Put an ignored face back in the Faces queue |
+| `POST` | `/api/v1/faces/clusters/{clusterId}/confirm` | bearer | Name every unlabeled face in a cluster |
+| `POST` | `/api/v1/faces/clusters/{clusterId}/ignore` | bearer | Skip labeling every unlabeled face in a cluster |
+| `GET` | `/api/v1/places` | bearer | Places with memory counts |
+| `PATCH` | `/api/v1/places/{id}` | bearer | Rename (`displayName`); locks the name against geocoding |
+| `POST` | `/api/v1/places/{id}/merge` | bearer | Merge `sourcePlaceId` into this place (keeps the source GPS cell as an alias) |
+| `GET` | `/api/v1/places/{id}` | bearer | Place plus recent memories |
+| `GET` | `/api/v1/trips` | bearer | Saved trips plus GPS-derived suggestions |
+| `POST` | `/api/v1/trips` | bearer | Create a trip (`title`, `startedAt`, `endedAt`, optional `notes`) |
+| `GET` | `/api/v1/trips/{id}` | bearer | Trip plus places, people, and memories in that window |
+| `PATCH` | `/api/v1/trips/{id}` | bearer | Edit title, dates, or notes |
+| `DELETE` | `/api/v1/trips/{id}` | bearer | Delete the trip (memories stay) |
+| `GET` | `/api/v1/health` | public | Lightweight liveness check |
+| `GET` | `/actuator/health` | public | Deep check including the database |
+
+Authentication is a stateless `Authorization: Bearer <jwt>` token, signed with HMAC-SHA256. The
+authorization rules are deny-by-default: only the endpoints listed as public above are reachable
+without a valid token. Every memory query is scoped to its owner, so another account's memory is a
+`404` rather than a `403` — the existence of someone else's data is not disclosed.
+
+The timeline takes a `zone` (an IANA identifier such as `Asia/Kolkata`) because which calendar day a
+memory falls on depends on the viewer, not on UTC. `from` and `to` are calendar dates, inclusive of
+both ends, interpreted in that zone.
+
+```bash
+# Register and keep the token
+TOKEN=$(curl -sX POST http://localhost:3000/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"correct-horse-battery","displayName":"You"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["accessToken"])')
+
+# A note about something that happened years ago
+curl -sX POST http://localhost:3000/api/v1/memories/text \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"First bicycle","content":"Learned to ride in the lane behind the house.",
+       "occurredAt":"1998-07-19T14:00:00Z"}'
+
+# A photo
+curl -sX POST http://localhost:3000/api/v1/memories/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'file=@photo.jpg' -F 'title=Sikkim, day two' -F 'occurredAt=2024-04-11T05:40:00Z'
+
+# The timeline, grouped in your own timezone
+curl -s 'http://localhost:3000/api/v1/timeline?zone=Asia/Kolkata' \
+  -H "Authorization: Bearer $TOKEN"
+
+# Find it again
+curl -s 'http://localhost:3000/api/v1/search?q=sikkim&zone=Asia/Kolkata' \
+  -H "Authorization: Bearer $TOKEN"
+
+# Ask a question (sources come back with the answer)
+curl -sX POST http://localhost:3000/api/v1/ask \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What happened on the Sikkim trip?","zone":"Asia/Kolkata"}'
+
+# Import a WhatsApp chat export
+curl -sX POST http://localhost:3000/api/v1/imports/whatsapp \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@WhatsApp Chat with Rahul.txt" \
+  -F "zone=Asia/Kolkata"
+```
+
+## Running the project
+
+### With Docker Compose (nothing but Docker required)
+
+```bash
+cp .env.example .env
+
+# JWT_SECRET is mandatory and must be at least 32 characters
+openssl rand -base64 48
+
+# paste the value into JWT_SECRET in .env, then
+docker compose up --build
+```
+
+- App: <http://localhost:3000>
+- API: <http://localhost:8080/api/v1/health>
+- Postgres: `localhost:5432`
+
+Compose starts the backend only once Postgres is healthy, and the frontend only once the backend
+reports ready, so the stack comes up in a usable state on the first try.
+
+### Local development
+
+Requires JDK 21+, Maven and Node 20+.
+
+```bash
+# 1. Database only
+docker compose up -d db
+
+# 2. Backend on :8080
+cd Backend
+JWT_SECRET=$(openssl rand -base64 48) ./mvnw spring-boot:run
+
+# 3. Frontend on :5173, proxying /api to :8080
+cd Frontend
+npm install
+npm run dev
+```
+
+Configuration comes from the environment; nothing secret is committed. See
+[`.env.example`](.env.example) for every variable and its default.
+
+## Beta testing
+
+MemoryGraph is already multi-user: each account only sees its own memories. What you should **not**
+do is put an open sign-up form on the public internet — photos, chats and faces are too sensitive.
+
+Pick one of two shapes. For a first beta, **hosted + invite code** is usually easier for testers.
+Self-host is a better fit if a tester does not want their archive on your disk.
+
+### Option A — You host, they get an invite (recommended for 5–15 people)
+
+1. Rent a VPS with **8 GB RAM** and plenty of disk (faces + photo imports). Ubuntu 24.04 is fine.
+2. Point a hostname at it (`beta.yourdomain.com`) and install Docker + [Caddy](https://caddyserver.com/)
+   (or nginx) for HTTPS.
+3. Copy the project onto the box, `cp .env.example .env`, then set at least:
+
+   ```bash
+   JWT_SECRET=$(openssl rand -base64 48)
+   POSTGRES_PASSWORD=$(openssl rand -base64 24)
+   REGISTRATION_INVITE_CODE=$(openssl rand -base64 12)
+   ```
+
+   Put those values in `.env`. Leave `AI_*` on `none` unless you want to pay for OpenAI on testers'
+   Ask/captions.
+
+4. If testers will use Google Photos Picker, add
+   `https://beta.yourdomain.com/import/google/callback` as an authorized redirect URI and set
+   `GOOGLE_OAUTH_REDIRECT_URI` to the same URL.
+5. Bring the stack up (`docker compose up --build -d`). Put Caddy in front of port 3000:
+
+   ```
+   beta.yourdomain.com {
+     reverse_proxy localhost:3000
+   }
+   ```
+
+   Do not publish Postgres (`5432`) or the faces sidecar (`8090`) on the public internet. Compose
+   already binds them for local use — on a VPS, firewall everything except `80`/`443` (and maybe
+   `22`).
+
+6. Send each tester: the URL, the invite code, and a one-paragraph brief (what to try, that you can
+   see their files on this server, how to wipe via Privacy). They create their own account; you do
+   not share yours.
+
+7. Take volume backups on a schedule ([Backing up](#backing-up)). An in-app export is per-account,
+   not a server restore.
+
+When the beta is over, clear `REGISTRATION_INVITE_CODE` only if you want open sign-up — better to
+keep it set, or take the site down.
+
+### Option B — Each tester runs it on their laptop
+
+Send a zip or a private git clone plus:
+
+```bash
+cp .env.example .env
+# set JWT_SECRET and POSTGRES_PASSWORD
+docker compose up --build
+```
+
+They use `http://localhost:3000`. No invite code needed. Their photos never leave their machine.
+You collect feedback in a shared doc, not by looking at their archive.
+
+### What to ask testers
+
+Import a WhatsApp export, a handful of GPS photos, name a few faces, merge a duplicate person or
+place, save a trip, search and Ask. Note anything that felt unsafe, slow, or confusing. The Privacy
+page should be the way they leave: export, then delete account.
+
+## Free hosting
+
+Vercel, Netlify, Railway’s leftover free tier, and AWS/GCP “micro” VMs cannot run this stack.
+You need a box with roughly **8–12 GB RAM**, Docker, and disk for photos. Two ways to do that at $0:
+
+### Oracle Cloud Always Free (recommended if you want a 24/7 URL)
+
+Oracle’s Always Free Ampere VM is currently **2 OCPU / 12 GB RAM / 200 GB disk**. That is tight but
+enough for a small invite-only beta if you leave `AI_*` on `none`.
+
+1. Create an Oracle Cloud account (they ask for a card; stay inside Always Free limits and you
+   should not be charged). If your home region is out of capacity, try `us-phoenix-1`,
+   `us-ashburn-1`, or `eu-frankfurt-1`.
+2. Launch **VM.Standard.A1.Flex**, Ubuntu 24.04, **2 OCPU / 12 GB**, boot volume ≤ 200 GB.
+   Images here are ARM; this project’s Dockerfiles run on `linux/arm64`.
+3. In the VCN security list, allow **22**, **80**, and **443** only. Do not open 5432 or 8090.
+4. SSH in, install Docker, copy the project (git clone or the zip **without** `.env`), then:
+
+   ```bash
+   cp .env.example .env
+   # set JWT_SECRET, POSTGRES_PASSWORD, REGISTRATION_INVITE_CODE (see Option A)
+   sudo ufw allow 22,80,443/tcp && sudo ufw enable
+   docker compose -f docker-compose.yml -f docker-compose.hosted.yml up --build -d
+   ```
+
+   The hosted overlay binds the UI to `127.0.0.1:3000` and does not publish Postgres or faces.
+5. Free HTTPS without buying a domain: install [Caddy](https://caddyserver.com/) and a
+   [DuckDNS](https://www.duckdns.org/) name pointing at the VM’s public IP:
+
+   ```
+   yourname.duckdns.org {
+     reverse_proxy 127.0.0.1:3000
+   }
+   ```
+
+6. Send testers that URL + the invite code. First boot downloads InsightFace models (several
+   hundred MB) and may take a few minutes.
+
+If Oracle refuses the account or the region has no ARM capacity, the cheapest paid box that
+comfortably fits this app is a ~€4–6/month 8 GB VPS (Hetzner, etc.) — still follow Option A.
+
+### Your computer + Cloudflare Tunnel (zero cloud bill)
+
+If this Mac (or any always-on PC) already runs `docker compose up`, you can expose it without
+opening router ports:
+
+```bash
+# one-off test URL (changes every restart)
+cloudflared tunnel --url http://127.0.0.1:3000
+```
+
+For a stable hostname, create a named tunnel in a free Cloudflare account. Use
+`docker-compose.hosted.yml` so Postgres/faces stay on localhost. The machine must stay awake; testers’
+photos then live on **your** disk.
+
+## Backing up
+
+An in-app **Privacy → Download archive** is one account’s portable copy (JSON + files). It is not a
+full restore of the server. For the Docker Compose deployment, the archive lives in three named
+volumes — copy all three or photos and the database will disagree:
+
+| Volume | What it holds |
+| --- | --- |
+| `memorygraph_postgres-data` | Memories, people, places, search index |
+| `memorygraph_media-storage` | Photos and other files |
+| `memorygraph_face-models` | InsightFace models (can be re-downloaded, but a copy is faster) |
+
+Confirm names with `docker volume ls | grep memorygraph` — Compose prefixes them with the project
+name (`memorygraph` from `docker-compose.yml`).
+
+Stop the stack before copying so Postgres is not writing mid-backup:
+
+```bash
+mkdir -p ~/memorygraph-backup
+docker compose stop
+
+docker run --rm \
+  -v memorygraph_postgres-data:/from \
+  -v "$HOME/memorygraph-backup:/to" \
+  alpine tar czf /to/postgres-data.tar.gz -C /from .
+
+docker run --rm \
+  -v memorygraph_media-storage:/from \
+  -v "$HOME/memorygraph-backup:/to" \
+  alpine tar czf /to/media-storage.tar.gz -C /from .
+
+docker run --rm \
+  -v memorygraph_face-models:/from \
+  -v "$HOME/memorygraph-backup:/to" \
+  alpine tar czf /to/face-models.tar.gz -C /from .
+
+docker compose start
+```
+
+Restore onto an existing Compose project (volumes already created by `docker compose up` once):
+
+```bash
+docker compose stop
+
+docker run --rm \
+  -v memorygraph_postgres-data:/to \
+  -v "$HOME/memorygraph-backup:/from" \
+  alpine tar xzf /from/postgres-data.tar.gz -C /to
+
+docker run --rm \
+  -v memorygraph_media-storage:/to \
+  -v "$HOME/memorygraph-backup:/from" \
+  alpine tar xzf /from/media-storage.tar.gz -C /to
+
+docker run --rm \
+  -v memorygraph_face-models:/to \
+  -v "$HOME/memorygraph-backup:/from" \
+  alpine tar xzf /from/face-models.tar.gz -C /to
+
+docker compose start
+```
+
+Keep `.env` with the backup (JWT secret, optional OpenAI key). Without the same `JWT_SECRET`,
+existing sessions are invalid; the data is still there after you sign in again.
+
+## Testing
+
+```bash
+cd Backend && ./mvnw test        # unit + integration tests (needs Docker for Testcontainers)
+cd Frontend && npm run build     # type-checks, then bundles
+cd Frontend && npm run lint
+```
+
+Integration tests run against a real Postgres started by Testcontainers using the same image as
+Compose, so Flyway migrations and JPA mappings are verified against the production database engine
+rather than an in-memory substitute.
+
+The suite covers the things most expensive to get wrong: that a script cannot be uploaded as an image,
+that a generated storage key cannot escape its root, that an oversized upload leaves nothing behind,
+that a rejected retry eventually gives up — and, repeatedly, that one account cannot read, download,
+search or delete another's memories. Upload tests wait on the real asynchronous pipeline rather than
+substituting a synchronous executor, so the committed transaction, the event and the worker claim are
+all exercised. Search tests send text that looks like query syntax, SQL and HTML, because a search
+box accepts whatever is typed into it and none of that may become a 500. Ask and embedding tests run
+without an OpenAI key (hashing embeddings + retrieval-only answers) and assert owner isolation and
+an honest empty answer when nothing relevant was found.
+
+## Roadmap
+
+| Phase | Scope | State |
+| --- | --- | --- |
+| 1 | Auth, app shell, schema, migrations, error handling, containers | done |
+| 2 | Memories: notes, photo uploads, object storage, async processing, timeline | done |
+| 3 | Search: date and type filters, full-text, semantic-search abstraction | done |
+| 4 | AI: embeddings, vector storage, hybrid retrieval, RAG with source references | done |
+| 5 | Multimodal ingestion: WhatsApp import, EXIF, OCR, captions, HEIC | done |
+| 6 | Richer conversation messages + People from senders (faces deferred) | done |
+| 7 | Audio/video transcription, Places from GPS, people graph UX | done |
+| 8 | Google Photos Takeout + Picker OAuth | done |
+| 9 | Reverse-geocoded place names (Nominatim) | done |
+| 10 | Free local face detection (InsightFace) + confirm UI | done |
+
+Known gaps, deliberately left for the phase that can do them properly:
+
+- **OCR needs native Tesseract.** Without it the OCR step no-ops; photos still embed on filename /
+  EXIF-derived text and optional captions.
+- **HEIC is converted to JPEG** on ingest when `heif-convert` is available (Compose image includes
+  libheif-tools). Existing HEIC files convert on first view / next enrichment.
+- **Orphaned objects are not reclaimed.** A rolled-back upload or a failed delete can leave bytes with
+  no row pointing at them. Harmless but untidy; needs a sweep over each user's prefix.
+- **Memories cannot be edited.** Only created and deleted.
+- **No de-duplication.** The `checksum` index exists for it, but re-uploading the same photo creates a
+  second memory.
+- **Stemming is English.** Other scripts match as whole words. Language detection belongs with bulk
+  import.
+- **Hashing embeddings are not semantic.** Without an OpenAI key, paraphrase matching does not work;
+  shared words still find memories via full-text / Ask OR. Real embeddings need `OPENAI_API_KEY`.
+- **One vector per memory.** Long transcripts are not chunked yet.
+- **Face suggestions need exemplars.** Confirm “this is Raj” on one photo (or tag the memory) before
+  the local InsightFace sidecar can suggest matches on later photos. Set `FACES_ENABLED=false` to
+  skip the faces container; manual tagging still works.
+- **Google Photos has no continuous sync.** Takeout + interactive Picker only ([ADR 0017](docs/adr/0017-google-photos-takeout.md), [ADR 0018](docs/adr/0018-google-photos-picker-and-geocode.md)).
+- **Older WhatsApp imports lack `conversation_messages`.** Re-import (after deleting the job) or live
+  with the transcript fallback.

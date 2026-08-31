@@ -1,0 +1,55 @@
+# Secrets — never commit the real file. Keep .env.example.
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.p12
+*.key
+credentials.json
+client_secret*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and caches
+*.log
+.cache/
+.eslintcache
+.npm/
+
+# Backend (Maven)
+Backend/target/
+*.class
+
+# Frontend
+Frontend/node_modules/
+Frontend/dist/
+Frontend/dist-ssr/
+Frontend/.vite/
+*.tsbuildinfo
+
+# Faces sidecar (Python)
+faces/__pycache__/
+faces/.venv/
+faces/venv/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Editors / IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Local dumps, zips, and volume backups
+*.zip
+*.tar.gz
+memorygraph-backup/
+scratch-*.py
+
+# Cursor / agent leftovers
+.cursor/

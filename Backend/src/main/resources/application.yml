@@ -1,0 +1,143 @@
+spring:
+  application:
+    name: memorygraph-backend
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/memorygraph}
+    username: ${DATABASE_USERNAME:memorygraph}
+    password: ${DATABASE_PASSWORD:memorygraph}
+    hikari:
+      pool-name: memorygraph-pool
+      maximum-pool-size: ${DATABASE_POOL_SIZE:20}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema is owned by Flyway. Hibernate must never mutate it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  jackson:
+    # Only one of data/error is ever populated, so null members are omitted from the envelope.
+    default-property-inclusion: non_null
+    datatype:
+      datetime:
+        # Instants are serialised as ISO-8601 strings, which is what the frontend parses.
+        write-dates-as-timestamps: false
+
+  servlet:
+    multipart:
+      # First gate on an upload: rejected by the container before the application sees the body.
+      max-file-size: ${MAX_FILE_SIZE:1536MB}
+      max-request-size: ${MAX_REQUEST_SIZE:1600MB}
+
+  threads:
+    virtual:
+      enabled: true
+
+  # Spring AI auto-config is off by default (none) so the app boots without a key. Set both to
+  # `openai` and provide OPENAI_API_KEY to use real embeddings and chat.
+  ai:
+    model:
+      chat: ${AI_CHAT_PROVIDER:none}
+      embedding: ${AI_EMBEDDING_PROVIDER:none}
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      chat:
+        options:
+          model: ${AI_CHAT_MODEL:gpt-4o-mini}
+          temperature: ${AI_CHAT_TEMPERATURE:0.2}
+      embedding:
+        options:
+          model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    whitelabel:
+      enabled: false
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+memorygraph:
+  cors:
+    # Comma-separated list of allowed browser origins.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+  security:
+    jwt:
+      # Never commit a real secret. Provide JWT_SECRET via the environment.
+      secret: ${JWT_SECRET:dev-only-insecure-secret-change-me-please-32-bytes-minimum}
+      issuer: ${JWT_ISSUER:memorygraph}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT168H}
+  registration:
+    # Blank = open sign-up (local). Set REGISTRATION_INVITE_CODE for a closed beta.
+    invite-code: ${REGISTRATION_INVITE_CODE:}
+
+  storage:
+    backend: ${STORAGE_BACKEND:LOCAL}
+    # Enforced by the application in addition to the servlet limit below, because a declared
+    # content length cannot be trusted.
+    max-file-size: ${MAX_FILE_SIZE:1536MB}
+    local:
+      root: ${STORAGE_LOCAL_ROOT:./data/storage}
+
+  processing:
+    sweep-interval: ${PROCESSING_SWEEP_INTERVAL:PT30S}
+    batch-size: ${PROCESSING_BATCH_SIZE:20}
+    stale-after: ${PROCESSING_STALE_AFTER:PT5M}
+    worker-threads: ${PROCESSING_WORKER_THREADS:4}
+    queue-capacity: ${PROCESSING_QUEUE_CAPACITY:100}
+
+  ai:
+    # Labels and knobs our code reads. Provider selection lives under spring.ai.model.*.
+    embedding-model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
+    chat-model: ${AI_CHAT_MODEL:gpt-4o-mini}
+    dimensions: ${AI_EMBEDDING_DIMENSIONS:1536}
+    ask-top-k: ${AI_ASK_TOP_K:12}
+    chat-temperature: ${AI_CHAT_TEMPERATURE:0.2}
+    transcription-model: ${AI_TRANSCRIPTION_MODEL:whisper-1}
+    # Cosine distance ceiling for semantic hits (0 = identical, ~0.3–0.5 = related with OpenAI).
+    max-semantic-distance: ${AI_MAX_SEMANTIC_DISTANCE:0.45}
+
+  geocoding:
+    enabled: ${GEOCODING_ENABLED:true}
+    nominatim-url: ${NOMINATIM_URL:https://nominatim.openstreetmap.org}
+    user-agent: ${GEOCODING_USER_AGENT:MemoryGraph/1.0 (personal archive)}
+
+  faces:
+    enabled: ${FACES_ENABLED:true}
+    service-url: ${FACE_SERVICE_URL:http://faces:8090}
+    match-threshold: ${FACE_MATCH_THRESHOLD:0.45}
+    cluster-threshold: ${FACE_CLUSTER_THRESHOLD:0.5}
+    video-max-frames: ${FACE_VIDEO_MAX_FRAMES:8}
+    video-frame-interval-seconds: ${FACE_VIDEO_FRAME_INTERVAL_SECONDS:4}
+
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:}
+    client-secret: ${GOOGLE_CLIENT_SECRET:}
+    # Must match an authorized redirect URI on the Google Cloud OAuth client.
+    redirect-uri: ${GOOGLE_OAUTH_REDIRECT_URI:http://localhost:3000/import/google/callback}
+
+logging:
+  level:
+    com.memorygraph: ${LOG_LEVEL_APP:DEBUG}
+    org.springframework: INFO
+  pattern:
+    correlation: "[${spring.application.name},%X{requestId:-}] "

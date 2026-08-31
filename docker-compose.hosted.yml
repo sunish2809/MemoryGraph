@@ -1,0 +1,25 @@
+# Public beta overlay: nothing but the app is reachable from the internet.
+# Usage (on the VPS, after .env is filled in):
+#   docker compose -f docker-compose.yml -f docker-compose.hosted.yml up --build -d
+#
+# Put Caddy or cloudflared in front of 127.0.0.1:3000. Requires Docker Compose v2.24+
+# for `!override`.
+
+services:
+  db:
+    ports: !override []
+
+  faces:
+    ports: !override []
+    mem_limit: 4g
+
+  backend:
+    ports: !override []
+    mem_limit: 3g
+    environment:
+      PROCESSING_WORKER_THREADS: ${PROCESSING_WORKER_THREADS:-2}
+
+  frontend:
+    ports: !override
+      - '127.0.0.1:${FRONTEND_PORT:-3000}:80'
+    mem_limit: 256m

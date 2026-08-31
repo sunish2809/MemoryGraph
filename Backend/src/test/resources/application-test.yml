@@ -1,0 +1,42 @@
+memorygraph:
+  cors:
+    allowed-origins: http://localhost:5173
+  security:
+    jwt:
+      secret: integration-test-signing-secret-with-enough-length
+      issuer: memorygraph-test
+      access-token-ttl: PT15M
+  storage:
+    backend: LOCAL
+    max-file-size: 2MB
+    local:
+      # Under target/ so `mvn clean` disposes of anything a test wrote.
+      root: ./target/test-object-storage
+  processing:
+    # Effectively disabled: the sweeper must not fire on its own timer mid-assertion. Tests that care
+    # about recovery invoke it directly.
+    sweep-interval: PT1H
+    batch-size: 20
+    stale-after: PT5M
+    worker-threads: 1
+    queue-capacity: 10
+  geocoding:
+    enabled: false
+  ai:
+    embedding-model: text-embedding-3-small
+    chat-model: gpt-4o-mini
+    dimensions: 1536
+    ask-top-k: 5
+    chat-temperature: 0.0
+    max-semantic-distance: 0.45
+
+spring:
+  ai:
+    model:
+      chat: none
+      embedding: none
+
+logging:
+  level:
+    com.memorygraph: INFO
+    org.testcontainers: WARN

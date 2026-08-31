@@ -1,0 +1,107 @@
+name: memorygraph
+
+services:
+  db:
+    # pgvector image rather than plain postgres: embeddings land in this same database later, and
+    # switching the image after there is data in it is avoidable pain.
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-memorygraph}
+      POSTGRES_USER: ${POSTGRES_USER:-memorygraph}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memorygraph}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-memorygraph} -d ${POSTGRES_DB:-memorygraph}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./Backend
+    environment:
+      DATABASE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-memorygraph}
+      DATABASE_USERNAME: ${POSTGRES_USER:-memorygraph}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-memorygraph}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
+      JWT_ISSUER: ${JWT_ISSUER:-memorygraph}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-PT168H}
+      # The browser only ever talks to the frontend origin, which proxies /api to this service.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      REGISTRATION_INVITE_CODE: ${REGISTRATION_INVITE_CODE:-}
+      LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
+      STORAGE_BACKEND: LOCAL
+      STORAGE_LOCAL_ROOT: /var/lib/memorygraph/storage
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-1536MB}
+      MAX_REQUEST_SIZE: ${MAX_REQUEST_SIZE:-1600MB}
+      PROCESSING_WORKER_THREADS: ${PROCESSING_WORKER_THREADS:-4}
+      AI_CHAT_PROVIDER: ${AI_CHAT_PROVIDER:-none}
+      AI_EMBEDDING_PROVIDER: ${AI_EMBEDDING_PROVIDER:-none}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
+      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
+      AI_EMBEDDING_DIMENSIONS: ${AI_EMBEDDING_DIMENSIONS:-1536}
+      AI_ASK_TOP_K: ${AI_ASK_TOP_K:-8}
+      GEOCODING_ENABLED: ${GEOCODING_ENABLED:-true}
+      FACES_ENABLED: ${FACES_ENABLED:-true}
+      FACE_SERVICE_URL: ${FACE_SERVICE_URL:-http://faces:8090}
+      FACE_MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.45}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:3000/import/google/callback}
+    ports:
+      - '${BACKEND_PORT:-8080}:8080'
+    volumes:
+      # Uploaded files must outlive the container. Losing this volume loses the photos themselves,
+      # while the database would still hold rows pointing at them — so it is as precious as the DB.
+      - media-storage:/var/lib/memorygraph/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      faces:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://localhost:8080/actuator/health/readiness
+          | grep -q '"status":"UP"'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+  faces:
+    build:
+      context: ./faces
+    ports:
+      - '${FACES_PORT:-8090}:8090'
+    volumes:
+      - face-models:/models
+    healthcheck:
+      test: ['CMD-SHELL', 'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8090/health\")"']
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./Frontend
+    ports:
+      - '${FRONTEND_PORT:-3000}:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  media-storage:
+  face-models:

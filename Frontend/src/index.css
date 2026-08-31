@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+
+/*
+ * Night-archive palette: warm copper on deep slate (not purple-dashboard defaults).
+ * Fonts stay local/system — no CDN.
+ */
+@theme {
+  --color-ink: #07090d;
+  --color-surface: #10141c;
+  --color-surface-raised: #171d28;
+  --color-line: #2a3344;
+  --color-fg: #eef1f6;
+  --color-fg-muted: #8b95a8;
+  --color-accent: #d4a35c;
+  --color-accent-strong: #c48a3a;
+  --color-accent-muted: #2a2114;
+  --color-support: #5eb8a8;
+  --color-danger: #e86b6b;
+  --color-danger-muted: #2a1620;
+
+  --font-sans:
+    'Avenir Next', 'Segoe UI', 'Helvetica Neue', ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+
+  --radius-panel: 0.875rem;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink text-fg font-sans antialiased;
+    min-height: 100%;
+  }
+
+  #root {
+    height: 100%;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(55rem 36rem at 8% -8%, rgb(212 163 92 / 0.09), transparent 58%),
+      radial-gradient(48rem 32rem at 100% 0%, rgb(94 184 168 / 0.07), transparent 52%),
+      linear-gradient(180deg, #0b0f16 0%, #07090d 100%);
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .page-enter {
+    animation: rise-in 0.35s ease-out both;
+  }
+
+  :focus-visible {
+    @apply outline-accent outline-2 outline-offset-2;
+  }
+
+  /* Thin scrollbars for list panes */
+  .scroll-pane {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(212 163 92 / 0.35) transparent;
+  }
+
+  .scroll-pane::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scroll-pane::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scroll-pane::-webkit-scrollbar-thumb {
+    background: rgb(212 163 92 / 0.28);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .scroll-pane::-webkit-scrollbar-thumb:hover {
+    background: rgb(212 163 92 / 0.45);
+    background-clip: padding-box;
+  }
+
+  .leaflet-container {
+    background: #10141c;
+    font-family: inherit;
+  }
+
+  .leaflet-tooltip {
+    background: #171d28;
+    color: #eef1f6;
+    border: 1px solid #2a3344;
+  }
+
+  .leaflet-control-attribution {
+    background: rgb(16 20 28 / 0.85);
+    color: #8b95a8;
+  }
+
+  .leaflet-control-attribution a {
+    color: #d4a35c;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+}
