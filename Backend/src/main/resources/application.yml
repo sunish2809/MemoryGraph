@@ -60,7 +60,8 @@ spring:
           model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
 
 server:
-  port: ${SERVER_PORT:8080}
+  # Railway injects PORT for the public listener. Local Compose keeps 8080.
+  port: ${SERVER_PORT:${PORT:8080}}
   error:
     whitelabel:
       enabled: false

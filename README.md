@@ -23,6 +23,7 @@ semantically and ask questions about in plain language.
 - [Running the project](#running-the-project)
 - [Beta testing](#beta-testing)
 - [Free hosting](#free-hosting)
+- [Railway](#railway)
 - [Backing up](#backing-up)
 - [Testing](#testing)
 - [Roadmap](#roadmap)
@@ -653,6 +654,16 @@ cloudflared tunnel --url http://127.0.0.1:3000
 For a stable hostname, create a named tunnel in a free Cloudflare account. Use
 `docker-compose.hosted.yml` so Postgres/faces stay on localhost. The machine must stay awake; testers’
 photos then live on **your** disk.
+
+## Railway
+
+For a small invite-only beta, Railway can host all four pieces (pgvector Postgres, faces,
+backend, frontend). It is **not** free — faces RAM is the main cost.
+
+Do **not** use Railway’s one-click Postgres (no pgvector). Deploy image `pgvector/pgvector:pg17`,
+give only the frontend a public domain, and put volumes on Postgres, photos, and face models.
+
+Step-by-step service names, variables, and health checks: [`docs/railway.md`](docs/railway.md).
 
 ## Backing up
 
