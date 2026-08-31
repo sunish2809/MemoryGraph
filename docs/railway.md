@@ -74,7 +74,7 @@ First deploy downloads InsightFace weights (several hundred MB) and can take a f
 3. Variables (Reference the other services where noted):
 
    ```
-   SERVER_PORT=8080
+   PORT=8080
    JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true
    DATABASE_URL=jdbc:postgresql://postgres.railway.internal:5432/memorygraph
    DATABASE_USERNAME=memorygraph
@@ -98,7 +98,7 @@ First deploy downloads InsightFace weights (several hundred MB) and can take a f
    domain, put that exact `https://…` origin in `CORS_ALLOWED_ORIGINS` (the browser only needs
    it for the Vite-style absolute API; same-origin `/api` via nginx is fine either way).
 
-4. No public domain. Health check path: `/actuator/health/readiness`.
+4. No public domain. Health check path: `/actuator/health/liveness`.
 
 Leave `AI_*` on `none` unless you want to pay OpenAI for Ask/captions.
 
@@ -124,7 +124,19 @@ Google Cloud).
 
 Redeploy backend after you know the public URL if you want `CORS_ALLOWED_ORIGINS` exact.
 
-## Order
+## If a service shows **Crashed** after Live
+
+Open that service → **Deployments** → the failed deploy → **View logs**. The last red
+lines matter.
+
+Typical causes:
+
+| What you see | What to do |
+| --- | --- |
+| Faces / backend **OOM** / killed | Raise memory (faces ≥ 2 GB, backend ≥ 1 GB) |
+| `Connection refused` / `postgres.railway.internal` | Postgres must be running first; check the service name is exactly `postgres` |
+| Health check timeout | Backend must listen on Railway’s `PORT` (set `PORT=8080` on backend) |
+| Frontend live, API 502 | `BACKEND_HOST=backend.railway.internal` and backend service name is `backend` |
 
 Deploy **postgres** first and wait until it is running, then **faces**, then **backend**, then
 **frontend**. The app retries a bit, but Flyway needs a live database on boot.
