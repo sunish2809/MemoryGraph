@@ -27,6 +27,8 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+    connect-retries: 10
+    connect-retries-interval: 5s
 
   jackson:
     # Only one of data/error is ever populated, so null members are omitted from the envelope.
