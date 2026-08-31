@@ -1,6 +1,9 @@
+# Point Railway Config-as-code at /faces/railway.toml
+# and set this service's Root Directory to faces (not /).
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+watchPatterns = ["/faces/**"]
 
 [deploy]
 healthcheckPath = "/health"

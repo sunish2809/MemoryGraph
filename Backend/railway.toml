@@ -1,6 +1,9 @@
+# Point Railway Config-as-code at /Backend/railway.toml
+# and set this service's Root Directory to Backend (not /).
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+watchPatterns = ["/Backend/**"]
 
 [deploy]
 healthcheckPath = "/actuator/health/readiness"

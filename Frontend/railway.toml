@@ -1,6 +1,9 @@
+# Point Railway Config-as-code at /Frontend/railway.toml
+# and set this service's Root Directory to Frontend (not /).
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+watchPatterns = ["/Frontend/**"]
 
 [deploy]
 healthcheckPath = "/"

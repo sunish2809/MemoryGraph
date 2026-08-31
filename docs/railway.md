@@ -3,6 +3,22 @@
 Railway does **not** run `docker-compose.yml`. Create **four services** in one project from
 this GitHub repo. Only **frontend** should have a public URL.
 
+## If you see `Railpack could not determine how to build`
+
+You connected GitHub to **one** service whose root is `/`. Railpack then looks at the
+whole repo (`Backend/`, `Frontend/`, `faces/`) and finds no single language.
+
+Do **not** add a `start.sh` at the repo root. Fix the service instead:
+
+1. Open the failed service → **Settings**.
+2. **Root Directory** = one of `Backend`, `Frontend`, or `faces` (not `/`).
+3. **Builder** = **Dockerfile** (not Railpack). We already have a `Dockerfile` in each of those folders.
+4. **Config as code** path (optional): `/Backend/railway.toml`, `/Frontend/railway.toml`, or `/faces/railway.toml`.
+
+Then create the **other** services the same way. You need four services total, not one.
+
+A “Deploy from repo” button that points at `sunish2809/MemoryGraph` with no root directory will always fail this way.
+
 You need pgvector (for search embeddings). Railway’s one-click Postgres plugin is plain
 Postgres — do **not** use it.
 
