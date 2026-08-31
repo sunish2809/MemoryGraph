@@ -57,38 +57,41 @@ export function PrivacyPage() {
       <header>
         <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Privacy</h1>
         <p className="mt-1 max-w-2xl text-sm text-fg-muted">
-          What this copy of MemoryGraph does with {user?.displayName ? `${user.displayName}'s` : 'your'}{' '}
-          archive — before anyone else uses it.
+          How this server handles {user?.displayName ? `${user.displayName}'s` : 'your'} archive —
+          including where files live and who can see them.
         </p>
       </header>
 
       <Panel title="Where your data lives">
         <ul className="flex flex-col gap-3 text-sm leading-relaxed text-fg">
           <li>
-            Memories, photos, chats, people and places are stored on the machine that runs this app
-            (Postgres and local files). There is no MemoryGraph cloud.
+            Memories, photos, chats, people and places are stored on this server: a
+            Postgres database and files on a disk volume. They are not sent to a MemoryGraph company
+            cloud — there isn&apos;t one. They also do not stay on your phone or laptop after you
+            upload. The person who operates this server can access that machine.
           </li>
           <li>
             {facesOn
-              ? 'Face detection runs locally (InsightFace on this computer). Photos are not sent to a face-recognition service.'
+              ? 'Face detection runs on this server (InsightFace). Photos are not sent to a third-party face-recognition company.'
               : 'Face detection is turned off on this server. You can still tag people by name.'}
           </li>
           <li>
             {chatOn
-              ? `Ask can send your question and the retrieved memory text to OpenAI (${privacy?.languageModel}) to phrase an answer. Retrieval still happens here. If OpenAI refuses (quota or an outage), Ask lists the matching memories instead of inventing a reply.`
-              : 'Ask searches your archive here. A language model is not configured, so answers list the matching memories instead of paraphrasing them. Semantic (paraphrase) search also needs an OpenAI embedding key — without it, shared words still find memories.'}
+              ? `Ask can send your question and the retrieved memory text to OpenAI (${privacy?.languageModel}) to phrase an answer. Retrieval still happens on this server. If OpenAI refuses (quota or an outage), Ask lists the matching memories instead of inventing a reply.`
+              : 'Ask searches your archive on this server. A language model is not configured, so answers list the matching memories instead of paraphrasing them. Semantic (paraphrase) search also needs an OpenAI embedding key — without it, shared words still find memories.'}
           </li>
           <li>
-            Signing in uses a token on this device. Other people need an account on this same server;
-            they cannot see your memories.
+            Signing in uses a token in this browser. Other accounts on this server cannot see your
+            memories. Export or delete your account below if you want a copy off the server, or to
+            remove it.
           </li>
         </ul>
       </Panel>
 
       <Panel title="Export a copy">
         <p className="mb-4 text-sm leading-relaxed text-fg-muted">
-          Download a zip of your memories (JSON) and the photo/file bytes. This is one account’s
-          portable copy — not a full server backup. Volume backup is documented in the project README.
+          Download a zip of your memories (JSON) and the photo/file bytes. This is one account&apos;s
+          portable copy — not a backup of the whole server.
         </p>
         {exportError && <Alert>{exportError}</Alert>}
         <Button
@@ -103,8 +106,8 @@ export function PrivacyPage() {
 
       <Panel title="Delete this account">
         <p className="mb-4 text-sm leading-relaxed text-fg-muted">
-          Permanently removes your memories, files, people, places and this login. Export first if you
-          want a copy. Type DELETE and your password to confirm.
+          Permanently removes your memories, files, people, places and this login from this server.
+          Export first if you want a copy. Type DELETE and your password to confirm.
         </p>
         {deleteError && <Alert>{deleteError.message}</Alert>}
         <form

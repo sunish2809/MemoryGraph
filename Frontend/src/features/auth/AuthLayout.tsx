@@ -43,7 +43,7 @@ export function AuthLayout({
             {[
               'Everything becomes a memory with a time, a place and people',
               'Answers cite the memories they came from',
-              'Your data stays in your own database and object storage',
+              'Your memories stay on this server, not a MemoryGraph company cloud',
             ].map((point) => (
               <li key={point} className="flex gap-3">
                 <span aria-hidden="true" className="text-support">
