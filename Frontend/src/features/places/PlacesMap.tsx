@@ -11,7 +11,7 @@ const ACCENT = '#d4a35c'
 export function PlacesMap({
   places,
   selectedId,
-  className = 'h-80 w-full overflow-hidden rounded-xl border border-line/70',
+  className = 'places-map h-80 w-full overflow-hidden rounded-xl border border-line/70',
 }: {
   places: PlaceSummary[]
   selectedId?: string
@@ -28,8 +28,10 @@ export function PlacesMap({
     }
 
     const map = L.map(element, { scrollWheelZoom: false })
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    // Leaflet is free. CARTO's dark tiles now watermark "API key required"; OSM raster
+    // tiles do not. A CSS invert on .places-map keeps the night-archive look.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map)
 
@@ -63,5 +65,5 @@ export function PlacesMap({
     return null
   }
 
-  return <div ref={containerRef} className={className} />
+  return <div ref={containerRef} className={`places-map ${className}`} />
 }

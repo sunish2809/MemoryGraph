@@ -103,6 +103,15 @@
     font-family: inherit;
   }
 
+  /* OSM tiles are light; invert them so Places matches the rest of the app without a Carto key. */
+  .places-map .leaflet-tile {
+    filter: invert(1) hue-rotate(180deg) brightness(0.9) saturate(0.35);
+  }
+
+  .places-map .leaflet-control-zoom a {
+    filter: invert(1) hue-rotate(180deg);
+  }
+
   .leaflet-tooltip {
     background: #171d28;
     color: #eef1f6;
