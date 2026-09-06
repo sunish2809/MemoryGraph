@@ -202,9 +202,9 @@ export function ImportPage() {
             </p>
             {!google.isLoading && !googleConfigured && (
               <p className="mt-3 text-xs text-fg-muted">
-                Picker needs <code className="text-fg">GOOGLE_CLIENT_ID</code> /{' '}
-                <code className="text-fg">GOOGLE_CLIENT_SECRET</code> in{' '}
-                <code className="text-fg">.env</code>. Takeout upload below still works without them.
+                Live pick from Google is not turned on for this server. You do not need any keys.
+                Export a Google Takeout zip and upload it below — that path works without signing in
+                to Google here.
               </p>
             )}
             {googleConfigured && !googleConnected && (
@@ -304,7 +304,7 @@ export function ImportPage() {
           <EmptyState
             icon="⤓"
             title="How to export Google Photos (bulk)"
-            description="For large libraries use Google Takeout: select Google Photos → export → upload the .zip here (up to 1.5GB). Or Connect Google above and pick a smaller set live."
+            description="For a library: takeout.google.com → select Google Photos → export → upload the .zip here (up to 1.5GB). No API keys. If Connect Google is shown above, you can also pick a smaller set live."
             footnote={
               <a
                 className="text-accent hover:underline"
