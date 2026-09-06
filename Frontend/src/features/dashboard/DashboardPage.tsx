@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 
 import { PageShell } from '@/components/layout/PageShell'
 import { Button } from '@/components/ui/Button'
@@ -9,6 +9,7 @@ import { MemoryCard } from '@/features/memories/MemoryCard'
 import { NewMemoryDialog } from '@/features/memories/NewMemoryDialog'
 import { useMemoryList, useMemoryStats } from '@/features/memories/useMemories'
 import { SearchBar } from '@/features/search/SearchBar'
+import { hasSeenWelcome } from '@/lib/welcome'
 
 const RECENT_COUNT = 8
 
@@ -22,6 +23,10 @@ export function DashboardPage() {
   const [question, setQuestion] = useState('')
   const { data: recent, isPending } = useMemoryList(0, RECENT_COUNT)
   const { data: stats } = useMemoryStats()
+
+  if (user && !hasSeenWelcome(user.id)) {
+    return <Navigate to="/welcome" replace />
+  }
 
   const total = stats?.totalMemories ?? 0
 

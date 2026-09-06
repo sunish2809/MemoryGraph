@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/useAuth'
 import { BackendStatus } from '@/features/system/BackendStatus'
 
 const navigation = [
+  { to: '/welcome', label: 'Welcome', hint: 'Tour' },
   { to: '/', label: 'Dashboard', hint: 'Overview' },
   { to: '/timeline', label: 'Timeline', hint: 'By date' },
   { to: '/search', label: 'Search', hint: 'Find' },

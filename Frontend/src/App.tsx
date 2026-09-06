@@ -21,6 +21,7 @@ import { NotFoundPage } from '@/features/system/NotFoundPage'
 import { TimelinePage } from '@/features/timeline/TimelinePage'
 import { TripDetailPage } from '@/features/trips/TripDetailPage'
 import { TripsPage } from '@/features/trips/TripsPage'
+import { WelcomePage } from '@/features/welcome/WelcomePage'
 
 export function App() {
   return (
@@ -33,6 +34,7 @@ export function App() {
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
+          <Route path="/welcome" element={<WelcomePage />} />
           <Route path="/timeline" element={<TimelinePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/people" element={<PeoplePage />} />
