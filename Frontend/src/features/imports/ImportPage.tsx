@@ -194,23 +194,22 @@ export function ImportPage() {
         </div>
 
         {source === 'google-photos' && (
-          <div className="mb-6 rounded-lg border border-line/70 bg-ink/30 p-4">
-            <h2 className="text-sm font-medium">Live pick (Photos Picker)</h2>
-            <p className="mt-1 text-xs text-fg-muted">
-              Choose photos in Google&apos;s UI. Continuous library sync is not available to apps —
-              this is interactive selection only.
+          <div className="mb-6 rounded-lg border border-accent/35 bg-accent-muted/40 p-4">
+            <h2 className="text-sm font-medium text-fg">Choose from Google Photos</h2>
+            <p className="mt-1 text-xs leading-relaxed text-fg-muted">
+              Sign in with Google, then pick albums or photos in Google&apos;s picker. This server
+              only receives what you select — not your whole library.
             </p>
             {!google.isLoading && !googleConfigured && (
               <p className="mt-3 text-xs text-fg-muted">
-                Live pick from Google is not turned on for this server. You do not need any keys.
-                Export a Google Takeout zip and upload it below — that path works without signing in
-                to Google here.
+                Live pick is not enabled on this server yet. Use a Takeout zip below until the
+                operator turns Google sign-in on.
               </p>
             )}
             {googleConfigured && !googleConnected && (
               <div className="mt-3">
                 <Button type="button" onClick={() => void onConnectGoogle()} disabled={authorize.isPending}>
-                  {authorize.isPending ? 'Redirecting…' : 'Connect Google'}
+                  {authorize.isPending ? 'Redirecting…' : 'Open Google Photos'}
                 </Button>
               </div>
             )}

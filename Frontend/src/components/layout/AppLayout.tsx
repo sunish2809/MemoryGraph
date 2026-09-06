@@ -3,7 +3,6 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { NetworkBackdrop } from '@/components/layout/NetworkBackdrop'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/features/auth/useAuth'
-import { BackendStatus } from '@/features/system/BackendStatus'
 
 const navigation = [
   { to: '/welcome', label: 'Welcome', hint: 'Tour' },
@@ -54,9 +53,6 @@ export function AppLayout() {
               </NavLink>
             ))}
           </nav>
-          <div className="mt-4 border-t border-line/50 pt-4">
-            <BackendStatus />
-          </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
