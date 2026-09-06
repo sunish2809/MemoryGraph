@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -45,6 +46,8 @@ public class GooglePhotosPickerClient {
             PickerSession session = picker.post()
                     .uri("/v1/sessions")
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{}")
                     .retrieve()
                     .body(PickerSession.class);
             if (session == null || session.id() == null || session.pickerUri() == null) {
@@ -52,21 +55,23 @@ public class GooglePhotosPickerClient {
             }
             return session;
         } catch (RestClientException ex) {
-            log.warn("Picker session create failed: {}", ex.getMessage());
-            String detail = ex.getMessage() != null ? ex.getMessage() : "";
+            String detail = rootMessage(ex);
+            log.warn("Picker session create failed: {}", detail);
             if (detail.contains("SERVICE_DISABLED") || detail.contains("has not been used")
-                    || detail.contains("is disabled")) {
+                    || detail.contains("is disabled") || detail.contains("Photos Picker API")) {
                 throw new ApiException(ErrorCode.VALIDATION_FAILED,
                         "Enable the Google Photos Picker API in Google Cloud for this project, wait a few minutes, then try again. "
                                 + "https://console.developers.google.com/apis/api/photospicker.googleapis.com/overview",
                         ex);
             }
-            if (detail.contains("403") || detail.contains("PERMISSION_DENIED")) {
+            if (detail.contains("403") || detail.contains("PERMISSION_DENIED") || detail.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT")) {
                 throw new ApiException(ErrorCode.VALIDATION_FAILED,
-                        "Google Photos Picker was denied. Check the Photos Picker API is enabled and your OAuth consent includes the picker scope.",
+                        "Google Photos Picker was denied. Enable the Photos Picker API and add the scope "
+                                + "photospicker.mediaitems.readonly on the OAuth consent screen, then Disconnect and connect again.",
                         ex);
             }
-            throw new ApiException(ErrorCode.INTERNAL_ERROR, "Could not start Google Photos picker", ex);
+            throw new ApiException(ErrorCode.INTERNAL_ERROR,
+                    "Could not start Google Photos picker. " + detail, ex);
         }
     }
 
