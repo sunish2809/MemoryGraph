@@ -23,6 +23,9 @@ class JwtServiceTest {
     void issuedTokenCanBeVerifiedAndCarriesTheUserId() {
         AccessToken token = jwtService.issue(USER_ID, "someone@example.com");
 
+        VerifiedAccessToken verified = jwtService.verify(token.value());
+        assertThat(verified.userId()).isEqualTo(USER_ID);
+        assertThat(verified.issuedAt()).isBeforeOrEqualTo(Instant.now());
         assertThat(jwtService.verifyAndExtractUserId(token.value())).isEqualTo(USER_ID);
         assertThat(token.expiresAt()).isAfter(Instant.now());
     }

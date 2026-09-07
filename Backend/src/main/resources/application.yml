@@ -44,6 +44,15 @@ spring:
       max-file-size: ${MAX_FILE_SIZE:1536MB}
       max-request-size: ${MAX_REQUEST_SIZE:1600MB}
 
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
   threads:
     virtual:
       enabled: true
@@ -96,6 +105,12 @@ memorygraph:
   registration:
     # Blank = open sign-up (local). Set REGISTRATION_INVITE_CODE for a closed beta.
     invite-code: ${REGISTRATION_INVITE_CODE:}
+
+  password-reset:
+    token-ttl: ${PASSWORD_RESET_TOKEN_TTL:PT1H}
+    # Origin used in reset emails (no trailing slash). Railway: https://memorygraph.net
+    public-base-url: ${APP_PUBLIC_URL:http://localhost:3000}
+    mail-from: ${MAIL_FROM:MemoryGraph <noreply@localhost>}
 
   storage:
     backend: ${STORAGE_BACKEND:LOCAL}

@@ -2,17 +2,28 @@ package com.memorygraph.backend.auth.application;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.UUID;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.memorygraph.backend.auth.api.dto.AuthenticationResponse;
+import com.memorygraph.backend.auth.api.dto.ForgotPasswordRequest;
 import com.memorygraph.backend.auth.api.dto.LoginRequest;
+import com.memorygraph.backend.auth.api.dto.MessageResponse;
 import com.memorygraph.backend.auth.api.dto.RegisterRequest;
 import com.memorygraph.backend.auth.api.dto.RegistrationOptionsResponse;
+import com.memorygraph.backend.auth.api.dto.ResetPasswordRequest;
 import com.memorygraph.backend.auth.api.dto.UserResponse;
+import com.memorygraph.backend.auth.domain.PasswordResetToken;
+import com.memorygraph.backend.auth.domain.PasswordResetTokenRepository;
 import com.memorygraph.backend.auth.security.AccessToken;
 import com.memorygraph.backend.auth.security.JwtService;
 import com.memorygraph.backend.common.config.RegistrationProperties;
@@ -35,10 +46,19 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class AuthService {
 
+    public static final String FORGOT_PASSWORD_ACK =
+            "If that email is registered, we sent password-reset instructions.";
+
+    private static final SecureRandom RANDOM = new SecureRandom();
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RegistrationProperties registration;
+    private final PasswordResetTokenRepository passwordResetTokens;
+    private final PasswordResetProperties passwordReset;
+    private final PasswordResetMailer passwordResetMailer;
+    private final ObjectProvider<CapturedPasswordResetTokens> capturedResetTokens;
 
     @Transactional(readOnly = true)
     public RegistrationOptionsResponse registrationOptions() {
@@ -77,6 +97,36 @@ public class AuthService {
         return issueToken(user);
     }
 
+    /**
+     * Always acknowledges the same way, whether or not the address has an account, so this endpoint
+     * cannot be used to enumerate users.
+     */
+    @Transactional
+    public MessageResponse forgotPassword(ForgotPasswordRequest request) {
+        String email = User.normaliseEmail(request.email());
+        userRepository.findByEmail(email).filter(User::isEnabled).ifPresent(this::issuePasswordReset);
+        return new MessageResponse(FORGOT_PASSWORD_ACK);
+    }
+
+    @Transactional
+    public MessageResponse resetPassword(ResetPasswordRequest request) {
+        Instant now = Instant.now();
+        PasswordResetToken token = passwordResetTokens.findByTokenHash(hashResetToken(request.token()))
+                .filter(candidate -> candidate.isUsable(now))
+                .orElseThrow(AuthService::invalidResetToken);
+
+        User user = userRepository.findById(token.getUserId())
+                .orElseThrow(AuthService::invalidResetToken);
+        if (!user.isEnabled()) {
+            throw invalidResetToken();
+        }
+
+        user.changePasswordHash(passwordEncoder.encode(request.password()));
+        token.markUsed(now);
+        log.info("Reset password for user {}", user.getId());
+        return new MessageResponse("Password updated. Sign in with your new password.");
+    }
+
     @Transactional(readOnly = true)
     public UserResponse currentUser(UUID userId) {
         return userRepository.findById(userId)
@@ -97,6 +147,18 @@ public class AuthService {
         }
     }
 
+    private void issuePasswordReset(User user) {
+        passwordResetTokens.deleteUnusedByUserId(user.getId());
+        String rawToken = newResetToken();
+        Instant expiresAt = Instant.now().plus(passwordReset.tokenTtlOrDefault());
+        passwordResetTokens.save(PasswordResetToken.issue(user.getId(), hashResetToken(rawToken), expiresAt));
+
+        String resetUrl = passwordReset.publicBaseUrlOrDefault() + "/reset-password?token=" + rawToken;
+        passwordResetMailer.sendResetLink(user.getEmail(), resetUrl);
+        capturedResetTokens.ifAvailable(captured -> captured.record(user.getEmail(), rawToken));
+        log.info("Issued password-reset token for user {}", user.getId());
+    }
+
     private AuthenticationResponse issueToken(User user) {
         AccessToken token = jwtService.issue(user.getId(), user.getEmail());
         return AuthenticationResponse.of(token.value(), token.expiresAt(), UserResponse.from(user));
@@ -111,6 +173,10 @@ public class AuthService {
         return new ApiException(ErrorCode.INVALID_CREDENTIALS, "Invalid email or password");
     }
 
+    private static ApiException invalidResetToken() {
+        return new ApiException(ErrorCode.RESET_TOKEN_INVALID, "This reset link is invalid or has expired");
+    }
+
     private void requireInvite(String provided) {
         if (!registration.inviteRequired()) {
             return;
@@ -119,6 +185,21 @@ public class AuthService {
         byte[] given = provided == null ? new byte[0] : provided.strip().getBytes(StandardCharsets.UTF_8);
         if (expected.length != given.length || !MessageDigest.isEqual(expected, given)) {
             throw new ApiException(ErrorCode.INVITE_INVALID, "That invite code is not valid");
+        }
+    }
+
+    private static String newResetToken() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String hashResetToken(String rawToken) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(rawToken.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is required for password-reset tokens", ex);
         }
     }
 }

@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -8,16 +8,30 @@ import { TextField } from '@/components/ui/TextField'
 import { AuthLayout } from '@/features/auth/AuthLayout'
 import { useAuth } from '@/features/auth/useAuth'
 import { ApiRequestError } from '@/lib/ApiRequestError'
+import { clearLogoutReason, readLogoutReason } from '@/lib/session'
 
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [notice] = useState(() => {
+    if (location.state && typeof location.state === 'object' && 'passwordReset' in location.state) {
+      return 'Password updated. Sign in with your new password.'
+    }
+    if (readLogoutReason() === 'idle') {
+      return 'You were signed out after 30 minutes of inactivity.'
+    }
+    return null
+  })
 
   const mutation = useMutation({
     mutationFn: () => login({ email, password }),
-    onSuccess: () => navigate('/', { replace: true }),
+    onSuccess: () => {
+      clearLogoutReason()
+      navigate('/', { replace: true })
+    },
   })
 
   const error = mutation.error instanceof ApiRequestError ? mutation.error : null
@@ -42,6 +56,7 @@ export function LoginPage() {
           mutation.mutate()
         }}
       >
+        {notice && <Alert tone="info">{notice}</Alert>}
         {error && error.code !== 'VALIDATION_FAILED' && <Alert>{error.message}</Alert>}
 
         <TextField
@@ -63,6 +78,12 @@ export function LoginPage() {
           onChange={(event) => setPassword(event.target.value)}
         />
 
+        <div className="-mt-1 text-right text-sm">
+          <Link to="/forgot-password" className="text-accent hover:underline">
+            Forgot password?
+          </Link>
+        </div>
+
         <Button type="submit" isLoading={mutation.isPending} className="mt-2 w-full">
           Sign in
         </Button>
@@ -70,3 +91,4 @@ export function LoginPage() {
     </AuthLayout>
   )
 }
+

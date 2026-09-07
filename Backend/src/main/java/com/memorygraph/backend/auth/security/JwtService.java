@@ -77,17 +77,31 @@ public class JwtService {
      * @throws InvalidTokenException if the token cannot be trusted
      */
     public UUID verifyAndExtractUserId(String token) {
+        return verify(token).userId();
+    }
+
+    /**
+     * Verifies the signature, issuer and expiry, and returns the user id and issue time.
+     *
+     * @throws InvalidTokenException if the token cannot be trusted
+     */
+    public VerifiedAccessToken verify(String token) {
         JWTClaimsSet claims;
         try {
             claims = processor.process(token, null);
         } catch (Exception ex) {
             throw new InvalidTokenException("Access token could not be verified", ex);
         }
+        UUID userId;
         try {
-            return UUID.fromString(claims.getSubject());
+            userId = UUID.fromString(claims.getSubject());
         } catch (IllegalArgumentException ex) {
             throw new InvalidTokenException("Access token subject is not a valid user id", ex);
         }
+        Instant issuedAt = claims.getIssueTime() == null
+                ? Instant.EPOCH
+                : claims.getIssueTime().toInstant();
+        return new VerifiedAccessToken(userId, issuedAt);
     }
 
     private static DefaultJWTProcessor<SecurityContext> buildProcessor(byte[] secret, String issuer) {

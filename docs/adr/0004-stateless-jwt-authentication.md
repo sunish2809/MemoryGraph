@@ -21,12 +21,15 @@ Deliberate choices around it:
   proof of standing. Without this, disabling an account would only take effect when the token
   happened to expire.
 - **Authorization is deny-by-default.** `anyRequest().authenticated()`, with an explicit list of
-  public endpoints (register, login, health).
+  public endpoints (register, login, registration options, forgot/reset password, health).
 - **Data isolation is enforced in the repository, not in services.** `MemoryRepository` exposes only
   owner-scoped finders; there is no `findById(id)` that ignores the owner, so a forgotten check
   cannot compile into a leak. An integration test asserts the invariant directly.
 - **Login failures are indistinguishable.** An unknown email and a wrong password return the same
   `INVALID_CREDENTIALS` response, so the API cannot be used to enumerate accounts.
+- **Forgot-password is equally indistinguishable.** `POST /auth/forgot-password` always returns the
+  same acknowledgement. Reset tokens are stored hashed, expire in an hour, and work once. A password
+  change updates `credentials_updated_at` so previously issued JWTs are rejected.
 - **Password hashes are algorithm-prefixed** (Spring's delegating encoder, bcrypt today), so the
   algorithm can be upgraded without invalidating existing passwords.
 
@@ -36,9 +39,10 @@ Deliberate choices around it:
 - There is no server-side revocation list. A stolen token is valid until it expires, which is why
   the TTL is short (one hour by default) and why the account is re-checked per request.
 - The per-request user lookup is one indexed primary-key read. If it ever matters, it is cacheable.
-- The token is held in `localStorage`, which is readable by any script on the page. Accepted for now
-  given short TTLs and no third-party scripts; moving to a refresh token in an `httpOnly` cookie is
-  the intended follow-up and is the right fix before this is exposed publicly.
+- **The token is held in `sessionStorage`**, so closing the tab ends the session and the next visit
+  requires a sign-in. Refreshing the same tab keeps it. The tab also signs out after 30 minutes
+  without pointer, keyboard, or API activity. Tokens remain readable by any script on the page;
+  moving to a refresh token in an `httpOnly` cookie is the intended follow-up before a public launch.
 
 ## Alternatives rejected
 

@@ -50,19 +50,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private void authenticate(String token, HttpServletRequest request) {
-        UUID userId;
+        VerifiedAccessToken verified;
         try {
-            userId = jwtService.verifyAndExtractUserId(token);
+            verified = jwtService.verify(token);
         } catch (InvalidTokenException ex) {
             log.debug("Rejected bearer token: {}", ex.getMessage());
             return;
         }
 
+        UUID userId = verified.userId();
         // Re-read the account on every request so deactivated users lose access immediately rather
         // than when their token happens to expire.
         Optional<User> user = userRepository.findById(userId);
         if (user.isEmpty() || !user.get().isEnabled()) {
             log.debug("Bearer token references a missing or disabled user: {}", userId);
+            return;
+        }
+        if (verified.issuedAt().isBefore(user.get().getCredentialsUpdatedAt())) {
+            log.debug("Bearer token issued before the last password change: {}", userId);
             return;
         }
 

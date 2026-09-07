@@ -81,9 +81,10 @@ export function PrivacyPage() {
               : 'Ask searches your archive on this server. A language model is not configured, so answers list the matching memories instead of paraphrasing them. Semantic (paraphrase) search also needs an OpenAI embedding key — without it, shared words still find memories.'}
           </li>
           <li>
-            Signing in uses a token in this browser. Other accounts on this server cannot see your
-            memories. Export or delete your account below if you want a copy off the server, or to
-            remove it.
+            Signing in uses a token in this browser tab. It ends when you close the tab, after 30
+            minutes of inactivity, or when you sign out. Other accounts on this server cannot see
+            your memories. Export or delete your account below if you want a copy off the server, or
+            to remove it.
           </li>
         </ul>
       </Panel>

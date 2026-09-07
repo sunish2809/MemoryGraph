@@ -40,6 +40,13 @@ public class User {
     @Column(name = "enabled", nullable = false)
     private boolean enabled = true;
 
+    /**
+     * Tokens issued before this instant are rejected. Epoch until the first password change, so
+     * existing sessions survive the column being added.
+     */
+    @Column(name = "credentials_updated_at", nullable = false)
+    private Instant credentialsUpdatedAt = Instant.EPOCH;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -69,6 +76,7 @@ public class User {
 
     public void changePasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
+        this.credentialsUpdatedAt = Instant.now();
     }
 
     public void disable() {

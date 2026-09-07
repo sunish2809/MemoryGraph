@@ -1,6 +1,7 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 
 import { ApiRequestError } from '@/lib/ApiRequestError'
+import { touchSessionActivity } from '@/lib/idleSession'
 import { clearSession, readAccessToken } from '@/lib/session'
 import type { ApiEnvelope } from '@/types/api'
 
@@ -12,6 +13,7 @@ const http = axios.create({
 })
 
 http.interceptors.request.use((config) => {
+  touchSessionActivity()
   const token = readAccessToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -123,10 +125,12 @@ export const api = {
       url,
       data: form,
       timeout: 0,
-      ...(onProgress && {
-        onUploadProgress: (event) =>
-          onProgress(event.total ? Math.round((event.loaded / event.total) * 100) : 0),
-      }),
+      onUploadProgress: (event) => {
+        touchSessionActivity()
+        if (onProgress) {
+          onProgress(event.total ? Math.round((event.loaded / event.total) * 100) : 0)
+        }
+      },
     }),
 
   getBlob: requestBlob,

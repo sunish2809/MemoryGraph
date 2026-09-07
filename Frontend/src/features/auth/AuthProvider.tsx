@@ -5,7 +5,8 @@ import { AuthContext, type AuthContextValue } from '@/features/auth/AuthContext'
 import { authApi, type LoginPayload, type RegisterPayload } from '@/features/auth/authApi'
 import { onSessionExpired } from '@/lib/api'
 import { ApiRequestError } from '@/lib/ApiRequestError'
-import { clearSession, readSession, writeSession } from '@/lib/session'
+import { onIdleTimeout, startIdleWatch } from '@/lib/idleSession'
+import { clearSession, readSession, rememberLogoutReason, writeSession } from '@/lib/session'
 import type { AuthenticationResult, User } from '@/types/api'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -66,6 +67,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => onSessionExpired(logout), [logout])
+
+  useEffect(() => {
+    if (!user) return
+    const stopWatch = startIdleWatch()
+    const stopIdle = onIdleTimeout(() => {
+      rememberLogoutReason('idle')
+      logout()
+    })
+    return () => {
+      stopIdle()
+      stopWatch()
+    }
+  }, [user, logout])
 
   const value = useMemo<AuthContextValue>(
     () => ({

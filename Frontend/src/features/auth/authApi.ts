@@ -22,6 +22,10 @@ export const authApi = {
   register: (payload: RegisterPayload) => api.post<AuthenticationResult>('/auth/register', payload),
   login: (payload: LoginPayload) => api.post<AuthenticationResult>('/auth/login', payload),
   me: () => api.get<User>('/auth/me'),
+  forgotPassword: (email: string) =>
+    api.post<{ message: string }>('/auth/forgot-password', { email }),
+  resetPassword: (token: string, password: string) =>
+    api.post<{ message: string }>('/auth/reset-password', { token, password }),
 }
 
 export const systemApi = {

@@ -1,21 +1,42 @@
 const STORAGE_KEY = 'memorygraph.session'
+const LOGOUT_REASON_KEY = 'memorygraph.logoutReason'
 
 interface StoredSession {
   accessToken: string
   expiresAt: string
 }
 
+export type LogoutReason = 'idle'
+
 /**
- * Persists the access token so a page reload does not log the user out.
+ * Persists the access token for this browser tab only.
  *
- * The token lives in localStorage, which is readable by any script running on the page. That is an
- * accepted trade-off for the MVP given short-lived tokens and no third-party scripts; moving to a
- * refresh token in an httpOnly cookie is tracked as a follow-up.
+ * sessionStorage is cleared when the tab (or last tab of the browser session) closes, so opening
+ * the app again requires a fresh sign-in. Refreshing the same tab keeps the session. Leftover
+ * localStorage tokens from earlier builds are migrated once, then removed.
  */
 export const sessionStorageKey = STORAGE_KEY
 
+function browserStore(): Storage | null {
+  if (typeof window === 'undefined') return null
+  migrateLegacyLocalStorage()
+  return window.sessionStorage
+}
+
+function migrateLegacyLocalStorage(): void {
+  const leftover = window.localStorage.getItem(STORAGE_KEY)
+  if (leftover && !window.sessionStorage.getItem(STORAGE_KEY)) {
+    window.sessionStorage.setItem(STORAGE_KEY, leftover)
+  }
+  if (leftover) {
+    window.localStorage.removeItem(STORAGE_KEY)
+  }
+}
+
 export function readSession(): StoredSession | null {
-  const raw = window.localStorage.getItem(STORAGE_KEY)
+  const store = browserStore()
+  if (!store) return null
+  const raw = store.getItem(STORAGE_KEY)
   if (!raw) return null
 
   try {
@@ -33,13 +54,32 @@ export function readSession(): StoredSession | null {
 }
 
 export function writeSession(session: StoredSession): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+  const store = browserStore()
+  if (!store) return
+  store.setItem(STORAGE_KEY, JSON.stringify(session))
 }
 
 export function clearSession(): void {
+  if (typeof window === 'undefined') return
+  window.sessionStorage.removeItem(STORAGE_KEY)
   window.localStorage.removeItem(STORAGE_KEY)
 }
 
 export function readAccessToken(): string | null {
   return readSession()?.accessToken ?? null
+}
+
+export function rememberLogoutReason(reason: LogoutReason): void {
+  if (typeof window === 'undefined') return
+  window.sessionStorage.setItem(LOGOUT_REASON_KEY, reason)
+}
+
+export function readLogoutReason(): LogoutReason | null {
+  if (typeof window === 'undefined') return null
+  return window.sessionStorage.getItem(LOGOUT_REASON_KEY) === 'idle' ? 'idle' : null
+}
+
+export function clearLogoutReason(): void {
+  if (typeof window === 'undefined') return
+  window.sessionStorage.removeItem(LOGOUT_REASON_KEY)
 }

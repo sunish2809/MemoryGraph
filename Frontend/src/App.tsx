@@ -6,6 +6,8 @@ import { AskPage } from '@/features/ask/AskPage'
 import { PrivacyPage } from '@/features/account/PrivacyPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RegisterPage } from '@/features/auth/RegisterPage'
+import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
+import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { ImportPage } from '@/features/imports/ImportPage'
 import { GoogleOAuthCallbackPage } from '@/features/imports/GoogleOAuthCallbackPage'
@@ -29,7 +31,10 @@ export function App() {
       <Route element={<RedirectIfAuthenticated />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       </Route>
+
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>

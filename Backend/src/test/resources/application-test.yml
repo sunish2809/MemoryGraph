@@ -22,6 +22,10 @@ memorygraph:
     queue-capacity: 10
   geocoding:
     enabled: false
+  password-reset:
+    token-ttl: PT1H
+    public-base-url: http://localhost:3000
+    mail-from: MemoryGraph <noreply@localhost>
   ai:
     embedding-model: text-embedding-3-small
     chat-model: gpt-4o-mini

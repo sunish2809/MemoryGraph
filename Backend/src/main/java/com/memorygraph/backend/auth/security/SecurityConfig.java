@@ -26,8 +26,8 @@ import com.memorygraph.backend.common.config.MemoryGraphProperties;
 import com.memorygraph.backend.common.logging.RequestContext;
 
 /**
- * Stateless, deny-by-default HTTP security. Only registration, login and the health probes are
- * public; every other endpoint requires a verified bearer token.
+ * Stateless, deny-by-default HTTP security. Only registration, login, password reset and the
+ * health probes are public; every other endpoint requires a verified bearer token.
  */
 @Configuration
 @EnableWebSecurity
@@ -37,6 +37,8 @@ public class SecurityConfig {
             ApiPaths.V1 + "/auth/register",
             ApiPaths.V1 + "/auth/login",
             ApiPaths.V1 + "/auth/registration",
+            ApiPaths.V1 + "/auth/forgot-password",
+            ApiPaths.V1 + "/auth/reset-password",
             ApiPaths.V1 + "/health",
             "/actuator/health",
             "/actuator/health/**",

@@ -9,9 +9,12 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.memorygraph.backend.auth.api.dto.AuthenticationResponse;
+import com.memorygraph.backend.auth.api.dto.ForgotPasswordRequest;
 import com.memorygraph.backend.auth.api.dto.LoginRequest;
+import com.memorygraph.backend.auth.api.dto.MessageResponse;
 import com.memorygraph.backend.auth.api.dto.RegisterRequest;
 import com.memorygraph.backend.auth.api.dto.RegistrationOptionsResponse;
+import com.memorygraph.backend.auth.api.dto.ResetPasswordRequest;
 import com.memorygraph.backend.auth.api.dto.UserResponse;
 import com.memorygraph.backend.auth.application.AuthService;
 import com.memorygraph.backend.auth.security.CurrentUser;
@@ -42,6 +45,16 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<AuthenticationResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success(authService.login(request));
+    }
+
+    @PostMapping("/forgot-password")
+    public ApiResponse<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        return ApiResponse.success(authService.forgotPassword(request));
+    }
+
+    @PostMapping("/reset-password")
+    public ApiResponse<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return ApiResponse.success(authService.resetPassword(request));
     }
 
     @GetMapping("/me")
