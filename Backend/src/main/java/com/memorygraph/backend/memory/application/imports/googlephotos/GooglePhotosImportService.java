@@ -3,6 +3,7 @@ package com.memorygraph.backend.memory.application.imports.googlephotos;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -67,18 +68,30 @@ public class GooglePhotosImportService {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "Google Photos Takeout must be a .zip file");
         }
 
-        byte[] bytes = readAll(file);
-        GooglePhotosTakeoutReader.OpenedTakeout opened;
+        UUID importId = UUID.randomUUID();
+        StorageKey key = StorageKey.forImport(userId, importId, fileName);
+        StoredObject stored;
+        try (InputStream in = file.getInputStream()) {
+            stored = storage.store(key, in, file.getSize());
+        } catch (IOException | RuntimeException ex) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "Could not store Takeout zip", ex);
+        }
+
+        Path storedPath;
         try {
-            opened = takeoutReader.open(bytes, fileName);
+            storedPath = storage.retrieve(key).getFile().toPath();
+            takeoutReader.requirePhotos(storedPath);
         } catch (IllegalArgumentException ex) {
+            storage.delete(key);
             throw new ApiException(ErrorCode.VALIDATION_FAILED, ex.getMessage());
         } catch (IOException ex) {
+            storage.delete(key);
             throw new ApiException(ErrorCode.MALFORMED_REQUEST, "Could not read Takeout zip", ex);
         }
 
-        ImportJob existing = importJobs.findByUserIdAndChecksum(userId, opened.checksum()).orElse(null);
+        ImportJob existing = importJobs.findByUserIdAndChecksum(userId, stored.checksum()).orElse(null);
         if (existing != null) {
+            storage.delete(key);
             if (existing.getStatus() == ImportJobStatus.FAILED) {
                 existing.resetForRetry();
                 events.publishEvent(new ImportJobQueued(existing.getId()));
@@ -86,17 +99,11 @@ public class GooglePhotosImportService {
             return existing;
         }
 
-        ImportJob job = ImportJob.pending(userId, ImportKind.GOOGLE_PHOTOS, fileName, opened.checksum(), zone);
-        try {
-            storage.store(job.key(), new ByteArrayInputStream(bytes), bytes.length);
-        } catch (RuntimeException ex) {
-            throw new ApiException(ErrorCode.INTERNAL_ERROR, "Could not store Takeout zip", ex);
-        }
-
+        ImportJob job = ImportJob.pending(importId, userId, ImportKind.GOOGLE_PHOTOS, key, fileName,
+                stored.checksum(), zone);
         ImportJob saved = importJobs.save(job);
         events.publishEvent(new ImportJobQueued(saved.getId()));
-        log.info("Queued Google Photos import {} for user {} ({} photos)", saved.getId(), userId,
-                opened.photos().size());
+        log.info("Queued Google Photos import {} for user {} ({} bytes)", saved.getId(), userId, stored.sizeBytes());
         return saved;
     }
 
@@ -109,62 +116,61 @@ public class GooglePhotosImportService {
     @Transactional
     public Result process(ImportJob job) throws IOException {
         Resource resource = storage.retrieve(job.key());
-        byte[] bytes;
-        try (InputStream in = resource.getInputStream()) {
-            bytes = in.readAllBytes();
+        Path stored = resource.getFile().toPath();
+
+        try (GooglePhotosTakeoutReader.OpenedTakeout opened = takeoutReader.openStored(stored)) {
+            User owner = requireUser(job.getUserId());
+            int created = 0;
+
+            for (GooglePhotosTakeoutReader.PhotoEntry photo : opened.photos()) {
+                byte[] photoBytes = opened.readPhoto(photo);
+                if (photoBytes.length < SupportedMediaType.SIGNATURE_PROBE_BYTES) {
+                    continue;
+                }
+                byte[] header = new byte[SupportedMediaType.SIGNATURE_PROBE_BYTES];
+                System.arraycopy(photoBytes, 0, header, 0, header.length);
+                SupportedMediaType mediaType;
+                try {
+                    mediaType = uploadValidator.requireImage(header);
+                } catch (ApiException ex) {
+                    continue;
+                }
+
+                Instant occurredAt = photo.takenAt() != null ? photo.takenAt() : Instant.now();
+                Memory memory = Memory.create(owner, mediaType.memoryType(), MemorySource.IMPORT, occurredAt,
+                        photo.takenAt() != null);
+                String safeName = uploadValidator.sanitiseFileName(photo.fileName());
+                String albumHint = albumFromPath(photo.relativePath());
+                memory.describe(safeName, albumHint != null ? "Google Photos · " + albumHint : "Google Photos", null);
+                memory.linkImport(job.getId());
+                Memory saved = memories.save(memory);
+
+                var displayable = heicToJpeg.toDisplayable(photoBytes, safeName, mediaType);
+                StorageKey assetKey = StorageKey.forMemoryAsset(job.getUserId(), saved.getId(), displayable.fileName());
+                StoredObject storedAsset = storage.store(assetKey, new ByteArrayInputStream(displayable.bytes()),
+                        displayable.bytes().length);
+                MediaAsset asset = MediaAsset.of(assetKey, displayable.fileName(), displayable.mediaType().mimeType(),
+                        storedAsset.sizeBytes(), storedAsset.checksum());
+                if (photo.latitude() != null && photo.longitude() != null) {
+                    asset.recordCapture(photo.takenAt(), photo.latitude(), photo.longitude());
+                }
+                saved.attach(asset);
+
+                if (photo.latitude() != null && photo.longitude() != null) {
+                    placeLinks.upsertAndLink(job.getUserId(), saved.getId(), photo.latitude(), photo.longitude());
+                }
+
+                ProcessingJob meta = processingJobs.save(
+                        ProcessingJob.pending(saved.getId(), job.getUserId(), ProcessingJobType.MEDIA_METADATA));
+                events.publishEvent(new ProcessingJobQueued(meta.getId()));
+                created++;
+            }
+
+            if (created == 0) {
+                throw new IllegalArgumentException("No supported image files could be imported from the Takeout zip");
+            }
+            return new Result("Google Photos", created);
         }
-
-        GooglePhotosTakeoutReader.OpenedTakeout opened = takeoutReader.open(bytes, job.getFileName());
-        User owner = requireUser(job.getUserId());
-        int created = 0;
-
-        for (GooglePhotosTakeoutReader.PhotoEntry photo : opened.photos()) {
-            if (photo.bytes().length < SupportedMediaType.SIGNATURE_PROBE_BYTES) {
-                continue;
-            }
-            byte[] header = new byte[SupportedMediaType.SIGNATURE_PROBE_BYTES];
-            System.arraycopy(photo.bytes(), 0, header, 0, header.length);
-            SupportedMediaType mediaType;
-            try {
-                mediaType = uploadValidator.requireImage(header);
-            } catch (ApiException ex) {
-                continue;
-            }
-
-            Instant occurredAt = photo.takenAt() != null ? photo.takenAt() : Instant.now();
-            Memory memory = Memory.create(owner, mediaType.memoryType(), MemorySource.IMPORT, occurredAt,
-                    photo.takenAt() != null);
-            String safeName = uploadValidator.sanitiseFileName(photo.fileName());
-            String albumHint = albumFromPath(photo.relativePath());
-            memory.describe(safeName, albumHint != null ? "Google Photos · " + albumHint : "Google Photos", null);
-            memory.linkImport(job.getId());
-            Memory saved = memories.save(memory);
-
-            var displayable = heicToJpeg.toDisplayable(photo.bytes(), safeName, mediaType);
-            StorageKey assetKey = StorageKey.forMemoryAsset(job.getUserId(), saved.getId(), displayable.fileName());
-            StoredObject stored = storage.store(assetKey, new ByteArrayInputStream(displayable.bytes()),
-                    displayable.bytes().length);
-            MediaAsset asset = MediaAsset.of(assetKey, displayable.fileName(), displayable.mediaType().mimeType(),
-                    stored.sizeBytes(), stored.checksum());
-            if (photo.latitude() != null && photo.longitude() != null) {
-                asset.recordCapture(photo.takenAt(), photo.latitude(), photo.longitude());
-            }
-            saved.attach(asset);
-
-            if (photo.latitude() != null && photo.longitude() != null) {
-                placeLinks.upsertAndLink(job.getUserId(), saved.getId(), photo.latitude(), photo.longitude());
-            }
-
-            ProcessingJob meta = processingJobs.save(
-                    ProcessingJob.pending(saved.getId(), job.getUserId(), ProcessingJobType.MEDIA_METADATA));
-            events.publishEvent(new ProcessingJobQueued(meta.getId()));
-            created++;
-        }
-
-        if (created == 0) {
-            throw new IllegalArgumentException("No supported image files could be imported from the Takeout zip");
-        }
-        return new Result("Google Photos", created);
     }
 
     public record Result(String label, int memoriesCreated) {
@@ -173,14 +179,6 @@ public class GooglePhotosImportService {
     private User requireUser(UUID userId) {
         return users.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId));
-    }
-
-    private static byte[] readAll(MultipartFile file) {
-        try {
-            return file.getBytes();
-        } catch (IOException ex) {
-            throw new ApiException(ErrorCode.MALFORMED_REQUEST, "Uploaded file could not be read", ex);
-        }
     }
 
     /** Prefer the folder under "Google Photos/" as a human album hint. */

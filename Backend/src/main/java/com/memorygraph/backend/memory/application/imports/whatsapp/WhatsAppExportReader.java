@@ -1,85 +1,208 @@
 package com.memorygraph.backend.memory.application.imports.whatsapp;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
-
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PushbackInputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 /**
- * Opens a WhatsApp export (plain {@code .txt} or {@code .zip}) and yields the chat text plus any
- * media entries that can become photo memories.
+ * Opens a WhatsApp export (plain {@code .txt} or {@code .zip}).
+ * <p>
+ * Media is never held as a whole-archive map. Upload validation reads only the chat {@code .txt};
+ * processing opens the stored zip with {@link ZipFile} and extracts one attachment at a time.
  */
 @Component
 public class WhatsAppExportReader {
 
     private static final int MAX_ENTRY_BYTES = 40 * 1024 * 1024;
+    private static final int MAGIC_BYTES = 4;
 
-    public record OpenedExport(String chatText, String chatFileName, Map<String, byte[]> mediaByFileName) {
+    public record ChatPreview(String chatText, String chatFileName) {
         public String checksum() {
             return sha256Hex(chatText.getBytes(StandardCharsets.UTF_8));
         }
     }
 
-    public OpenedExport open(byte[] bytes, String originalFileName) throws IOException {
-        String lower = originalFileName == null ? "" : originalFileName.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".zip") || looksLikeZip(bytes)) {
-            return openZip(bytes, originalFileName);
+    /**
+     * Stored export ready for day-by-day import. Holds an open {@link ZipFile} when the payload is a
+     * zip so photos can be pulled by name without inflating the archive into the heap.
+     */
+    public record OpenedExport(String chatText, String chatFileName, ZipFile zip, List<ZipEntry> mediaEntries)
+            implements AutoCloseable {
+
+        public String checksum() {
+            return sha256Hex(chatText.getBytes(StandardCharsets.UTF_8));
         }
-        if (lower.endsWith(".txt") || isMostlyText(bytes)) {
-            return new OpenedExport(decodeText(bytes), originalFileName, Map.of());
+
+        /** Resolves an attachment name against zip entries (exact, basename, or suffix match). */
+        public byte[] findMedia(String attachmentName) {
+            if (zip == null || mediaEntries == null || mediaEntries.isEmpty()
+                    || !StringUtils.hasText(attachmentName)) {
+                return null;
+            }
+            ZipEntry match = resolveMediaEntry(attachmentName);
+            if (match == null) {
+                return null;
+            }
+            try (InputStream in = zip.getInputStream(match)) {
+                return readLimited(in);
+            } catch (IOException ex) {
+                return null;
+            }
+        }
+
+        private ZipEntry resolveMediaEntry(String attachmentName) {
+            String base = baseName(attachmentName);
+            String lower = base.toLowerCase(Locale.ROOT);
+            for (ZipEntry entry : mediaEntries) {
+                String name = entryName(entry.getName());
+                if (name.equals(attachmentName) || baseName(name).equals(base)) {
+                    return entry;
+                }
+            }
+            for (ZipEntry entry : mediaEntries) {
+                if (baseName(entryName(entry.getName())).toLowerCase(Locale.ROOT).equals(lower)) {
+                    return entry;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (zip != null) {
+                zip.close();
+            }
+        }
+    }
+
+    /**
+     * Reads chat text only. Zip media entries are discarded as they stream past so a 250&nbsp;MB
+     * export does not need 250&nbsp;MB of heap.
+     */
+    public ChatPreview readChatOnly(InputStream in, String originalFileName) throws IOException {
+        String lower = originalFileName == null ? "" : originalFileName.toLowerCase(Locale.ROOT);
+        PushbackInputStream pin = new PushbackInputStream(in, MAGIC_BYTES);
+        byte[] magic = pin.readNBytes(MAGIC_BYTES);
+        if (magic.length > 0) {
+            pin.unread(magic);
+        }
+        if (lower.endsWith(".zip") || looksLikeZip(magic)) {
+            return readChatFromZip(pin, originalFileName);
+        }
+        byte[] text = readLimited(pin);
+        if (lower.endsWith(".txt") || isMostlyText(text)) {
+            return new ChatPreview(decodeText(text), originalFileName);
         }
         throw new IllegalArgumentException("WhatsApp export must be a .txt chat or a .zip archive");
     }
 
-    private OpenedExport openZip(byte[] bytes, String originalFileName) throws IOException {
+    public OpenedExport openStored(Path path, String originalFileName) throws IOException {
+        String lower = originalFileName == null ? "" : originalFileName.toLowerCase(Locale.ROOT);
+        byte[] magic = readMagic(path);
+        if (lower.endsWith(".zip") || looksLikeZip(magic)) {
+            return openZipFile(path, originalFileName);
+        }
+        byte[] text;
+        try (InputStream in = Files.newInputStream(path)) {
+            text = readLimited(in);
+        }
+        if (lower.endsWith(".txt") || isMostlyText(text)) {
+            return new OpenedExport(decodeText(text), originalFileName, null, List.of());
+        }
+        throw new IllegalArgumentException("WhatsApp export must be a .txt chat or a .zip archive");
+    }
+
+    private ChatPreview readChatFromZip(InputStream in, String originalFileName) throws IOException {
         String chatText = null;
         String chatFileName = null;
-        Map<String, byte[]> media = new LinkedHashMap<>();
-
-        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
+        try (ZipInputStream zip = new ZipInputStream(in)) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 if (entry.isDirectory()) {
                     continue;
                 }
                 String name = entryName(entry.getName());
-                // macOS resource-fork junk, not the real chat.
                 if (baseName(name).startsWith("._")) {
+                    drain(zip);
                     continue;
                 }
-                byte[] content = readLimited(zip);
                 if (isChatFile(name)) {
                     if (chatText == null || prefersChatFile(name, chatFileName)) {
-                        chatText = decodeText(content);
+                        chatText = decodeText(readLimited(zip));
                         chatFileName = name;
+                    } else {
+                        drain(zip);
                     }
-                } else if (isMediaFile(name)) {
-                    media.putIfAbsent(baseName(name), content);
-                    media.putIfAbsent(name, content);
+                } else {
+                    drain(zip);
                 }
             }
         }
-
         if (chatText == null) {
             throw new IllegalArgumentException("Zip does not contain a WhatsApp chat .txt file");
         }
         String label = chatFileName != null ? chatFileName : originalFileName;
-        return new OpenedExport(chatText, label, Map.copyOf(media));
+        return new ChatPreview(chatText, label);
+    }
+
+    private OpenedExport openZipFile(Path path, String originalFileName) throws IOException {
+        ZipFile zip = new ZipFile(path.toFile(), StandardCharsets.UTF_8);
+        try {
+            List<ZipEntry> chatEntries = new ArrayList<>();
+            List<ZipEntry> media = new ArrayList<>();
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                String name = entryName(entry.getName());
+                if (baseName(name).startsWith("._")) {
+                    continue;
+                }
+                if (isChatFile(name)) {
+                    chatEntries.add(entry);
+                } else if (isMediaFile(name)) {
+                    media.add(entry);
+                }
+            }
+            ZipEntry chosenChat = null;
+            for (ZipEntry entry : chatEntries) {
+                String name = entryName(entry.getName());
+                if (chosenChat == null || prefersChatFile(name, entryName(chosenChat.getName()))) {
+                    chosenChat = entry;
+                }
+            }
+            if (chosenChat == null) {
+                throw new IllegalArgumentException("Zip does not contain a WhatsApp chat .txt file");
+            }
+            String chatText;
+            try (InputStream in = zip.getInputStream(chosenChat)) {
+                chatText = decodeText(readLimited(in));
+            }
+            String label = entryName(chosenChat.getName());
+            return new OpenedExport(chatText, label, zip, List.copyOf(media));
+        } catch (IOException | RuntimeException | Error ex) {
+            zip.close();
+            throw ex;
+        }
     }
 
     private static boolean prefersChatFile(String candidate, String current) {
@@ -97,10 +220,10 @@ public class WhatsAppExportReader {
     /** UTF-8 with BOM, falling back to UTF-16 when the export was saved that way. */
     static String decodeText(byte[] bytes) {
         if (bytes.length >= 2 && (bytes[0] & 0xff) == 0xfe && (bytes[1] & 0xff) == 0xff) {
-            return new String(bytes, java.nio.charset.StandardCharsets.UTF_16);
+            return new String(bytes, StandardCharsets.UTF_16);
         }
         if (bytes.length >= 2 && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xfe) {
-            return new String(bytes, java.nio.charset.StandardCharsets.UTF_16);
+            return new String(bytes, StandardCharsets.UTF_16);
         }
         String utf8 = new String(bytes, StandardCharsets.UTF_8);
         if (utf8.startsWith("\ufeff")) {
@@ -125,7 +248,7 @@ public class WhatsAppExportReader {
                 || lower.endsWith(".heic");
     }
 
-    private static String entryName(String raw) {
+    static String entryName(String raw) {
         String name = raw.replace('\\', '/');
         while (name.startsWith("./")) {
             name = name.substring(2);
@@ -133,12 +256,25 @@ public class WhatsAppExportReader {
         return name;
     }
 
-    private static String baseName(String path) {
+    static String baseName(String path) {
         int slash = path.lastIndexOf('/');
         return slash >= 0 ? path.substring(slash + 1) : path;
     }
 
-    private static byte[] readLimited(InputStream in) throws IOException {
+    private static byte[] readMagic(Path path) throws IOException {
+        try (InputStream in = Files.newInputStream(path)) {
+            return in.readNBytes(MAGIC_BYTES);
+        }
+    }
+
+    private static void drain(InputStream in) throws IOException {
+        byte[] buffer = new byte[8192];
+        while (in.read(buffer) >= 0) {
+            // discarded
+        }
+    }
+
+    static byte[] readLimited(InputStream in) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
         int total = 0;
@@ -154,7 +290,8 @@ public class WhatsAppExportReader {
     }
 
     private static boolean looksLikeZip(byte[] bytes) {
-        return bytes.length >= 4
+        return bytes != null
+                && bytes.length >= 4
                 && bytes[0] == 'P'
                 && bytes[1] == 'K';
     }
@@ -180,38 +317,5 @@ public class WhatsAppExportReader {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is required", ex);
         }
-    }
-
-    /** Resolves an attachment name against zip entries (exact, basename, or suffix match). */
-    public static byte[] findMedia(Map<String, byte[]> mediaByFileName, String attachmentName) {
-        if (!StringUtils.hasText(attachmentName) || mediaByFileName.isEmpty()) {
-            return null;
-        }
-        byte[] exact = mediaByFileName.get(attachmentName);
-        if (exact != null) {
-            return exact;
-        }
-        String base = baseName(attachmentName);
-        exact = mediaByFileName.get(base);
-        if (exact != null) {
-            return exact;
-        }
-        String lower = base.toLowerCase(Locale.ROOT);
-        for (Map.Entry<String, byte[]> entry : mediaByFileName.entrySet()) {
-            if (baseName(entry.getKey()).toLowerCase(Locale.ROOT).equals(lower)) {
-                return entry.getValue();
-            }
-        }
-        return null;
-    }
-
-    public static List<String> listMediaNames(Map<String, byte[]> mediaByFileName) {
-        List<String> names = new ArrayList<>();
-        for (String key : mediaByFileName.keySet()) {
-            if (!key.contains("/")) {
-                names.add(key);
-            }
-        }
-        return names;
     }
 }

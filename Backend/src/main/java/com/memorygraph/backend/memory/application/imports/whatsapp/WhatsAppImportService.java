@@ -3,6 +3,7 @@ package com.memorygraph.backend.memory.application.imports.whatsapp;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -25,7 +26,6 @@ import com.memorygraph.backend.memory.application.PersonLinkService;
 import com.memorygraph.backend.memory.application.imports.ImportJobQueued;
 import com.memorygraph.backend.memory.application.processing.EmbeddingJobEnqueuer;
 import com.memorygraph.backend.memory.application.processing.ProcessingJobQueued;
-import com.memorygraph.backend.memory.application.upload.HeicToJpegConverter;
 import com.memorygraph.backend.memory.application.upload.HeicToJpegConverter;
 import com.memorygraph.backend.memory.application.upload.SupportedMediaType;
 import com.memorygraph.backend.memory.application.upload.UploadValidator;
@@ -112,23 +112,34 @@ public class WhatsAppImportService {
         ViewerZone.parse(zone);
         String fileName = uploadValidator.validateImportPayload(file);
 
-        byte[] bytes = readAll(file);
-        WhatsAppExportReader.OpenedExport opened;
-        try {
-            opened = exportReader.open(bytes, fileName);
+        UUID importId = UUID.randomUUID();
+        StorageKey key = StorageKey.forImport(userId, importId, fileName);
+        try (InputStream in = file.getInputStream()) {
+            storage.store(key, in, file.getSize());
+        } catch (IOException | RuntimeException ex) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "Could not store WhatsApp export", ex);
+        }
+
+        WhatsAppExportReader.ChatPreview preview;
+        try (InputStream in = storage.retrieve(key).getInputStream()) {
+            preview = exportReader.readChatOnly(in, fileName);
         } catch (IllegalArgumentException ex) {
+            storage.delete(key);
             throw new ApiException(ErrorCode.VALIDATION_FAILED, ex.getMessage());
         } catch (IOException ex) {
+            storage.delete(key);
             throw new ApiException(ErrorCode.MALFORMED_REQUEST, "Could not read WhatsApp export", ex);
         }
 
-        if (opened.chatText().isBlank()) {
+        if (preview.chatText().isBlank()) {
+            storage.delete(key);
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "WhatsApp chat file is empty");
         }
 
-        String checksum = opened.checksum();
+        String checksum = preview.checksum();
         ImportJob existing = importJobs.findByUserIdAndChecksum(userId, checksum).orElse(null);
         if (existing != null) {
+            storage.delete(key);
             if (existing.getStatus() == ImportJobStatus.FAILED) {
                 existing.resetForRetry();
                 events.publishEvent(new ImportJobQueued(existing.getId()));
@@ -137,16 +148,10 @@ public class WhatsAppImportService {
             return existing;
         }
 
-        ImportJob job = ImportJob.pending(userId, ImportKind.WHATSAPP, fileName, checksum, zone);
-        try {
-            storage.store(job.key(), new ByteArrayInputStream(bytes), bytes.length);
-        } catch (RuntimeException ex) {
-            throw new ApiException(ErrorCode.INTERNAL_ERROR, "Could not store WhatsApp export", ex);
-        }
-
+        ImportJob job = ImportJob.pending(importId, userId, ImportKind.WHATSAPP, key, fileName, checksum, zone);
         ImportJob saved = importJobs.save(job);
         events.publishEvent(new ImportJobQueued(saved.getId()));
-        log.info("Queued WhatsApp import {} for user {} ({} bytes)", saved.getId(), userId, bytes.length);
+        log.info("Queued WhatsApp import {} for user {} ({} bytes)", saved.getId(), userId, file.getSize());
         return saved;
     }
 
@@ -163,35 +168,33 @@ public class WhatsAppImportService {
      */
     public Result process(ImportJob job) throws IOException {
         Resource resource = storage.retrieve(job.key());
-        byte[] bytes;
-        try (InputStream in = resource.getInputStream()) {
-            bytes = in.readAllBytes();
+        Path stored = resource.getFile().toPath();
+
+        try (WhatsAppExportReader.OpenedExport opened = exportReader.openStored(stored, job.getFileName())) {
+            String preferredName = WhatsAppChatParser.chatNameFromFileName(
+                    opened.chatFileName() != null ? opened.chatFileName() : job.getFileName());
+            WhatsAppChatParser.ParsedChat chat = chatParser.parse(opened.chatText(), preferredName);
+            if (chat.messages().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "No messages could be parsed from the WhatsApp export. First lines: "
+                                + WhatsAppChatParser.previewLines(opened.chatText(), 3));
+            }
+
+            var zone = ViewerZone.parse(job.getZone());
+            List<WhatsAppDayBucketer.DayBucket> days = WhatsAppDayBucketer.bucket(chat.messages());
+            User owner = requireUser(job.getUserId());
+            String selfDisplayName = owner.getDisplayName();
+            int created = 0;
+            Set<String> importedMedia = new HashSet<>();
+
+            for (WhatsAppDayBucketer.DayBucket day : days) {
+                Integer dayCreated = transactions.execute(status -> importOneDay(
+                        job, owner, selfDisplayName, chat.chatName(), zone, day, opened, importedMedia));
+                created += dayCreated != null ? dayCreated : 0;
+            }
+
+            return new Result(chat.chatName(), created);
         }
-
-        WhatsAppExportReader.OpenedExport opened = exportReader.open(bytes, job.getFileName());
-        String preferredName = WhatsAppChatParser.chatNameFromFileName(
-                opened.chatFileName() != null ? opened.chatFileName() : job.getFileName());
-        WhatsAppChatParser.ParsedChat chat = chatParser.parse(opened.chatText(), preferredName);
-        if (chat.messages().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "No messages could be parsed from the WhatsApp export. First lines: "
-                            + WhatsAppChatParser.previewLines(opened.chatText(), 3));
-        }
-
-        var zone = ViewerZone.parse(job.getZone());
-        List<WhatsAppDayBucketer.DayBucket> days = WhatsAppDayBucketer.bucket(chat.messages());
-        User owner = requireUser(job.getUserId());
-        String selfDisplayName = owner.getDisplayName();
-        int created = 0;
-        Set<String> importedMedia = new HashSet<>();
-
-        for (WhatsAppDayBucketer.DayBucket day : days) {
-            Integer dayCreated = transactions.execute(status -> importOneDay(
-                    job, owner, selfDisplayName, chat.chatName(), zone, day, opened, importedMedia));
-            created += dayCreated != null ? dayCreated : 0;
-        }
-
-        return new Result(chat.chatName(), created);
     }
 
     private int importOneDay(
@@ -237,7 +240,7 @@ public class WhatsAppImportService {
                 if (!importedMedia.add(attachment.toLowerCase(Locale.ROOT))) {
                     continue;
                 }
-                byte[] mediaBytes = WhatsAppExportReader.findMedia(opened.mediaByFileName(), attachment);
+                byte[] mediaBytes = opened.findMedia(attachment);
                 if (mediaBytes == null || mediaBytes.length < SupportedMediaType.SIGNATURE_PROBE_BYTES) {
                     continue;
                 }
@@ -283,11 +286,4 @@ public class WhatsAppImportService {
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId));
     }
 
-    private static byte[] readAll(MultipartFile file) {
-        try {
-            return file.getBytes();
-        } catch (IOException ex) {
-            throw new ApiException(ErrorCode.MALFORMED_REQUEST, "Uploaded file could not be read", ex);
-        }
-    }
 }

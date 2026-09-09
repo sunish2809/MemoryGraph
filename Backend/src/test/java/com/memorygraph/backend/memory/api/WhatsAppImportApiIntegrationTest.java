@@ -8,10 +8,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -130,6 +133,40 @@ class WhatsAppImportApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.grounded").value(true))
                 .andExpect(jsonPath("$.data.sources", hasSize(greaterThanOrEqualTo(1))));
+    }
+
+    @Test
+    void importsMatchedZipMediaAsPhotoMemories() throws Exception {
+        byte[] chat = new ClassPathResource("fixtures/whatsapp/sample-chat.txt").getContentAsByteArray();
+        byte[] png = java.util.HexFormat.of().parseHex(
+                "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C489"
+                        + "0000000A49444154789C63000100000500010D0A2DB40000000049454E44AE426082");
+        ByteArrayOutputStream packed = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(packed)) {
+            zip.putNextEntry(new ZipEntry("WhatsApp Chat with Rahul.txt"));
+            zip.write(chat);
+            zip.closeEntry();
+            zip.putNextEntry(new ZipEntry("IMG-20240815-WA0001.jpg"));
+            zip.write(png);
+            zip.closeEntry();
+        }
+        MockMultipartFile file = new MockMultipartFile("file", "WhatsApp Chat.zip",
+                "application/zip", packed.toByteArray());
+
+        MvcResult created = mockMvc.perform(multipart(IMPORTS + "/whatsapp")
+                        .file(file)
+                        .param("zone", "Asia/Kolkata")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        UUID importId = UUID.fromString(JsonPath.read(created.getResponse().getContentAsString(), "$.data.id"));
+        awaitImportCompleted(importId);
+
+        mockMvc.perform(get(IMPORTS + "/" + importId).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.memoriesCreated", greaterThanOrEqualTo(3)));
     }
 
     @Test

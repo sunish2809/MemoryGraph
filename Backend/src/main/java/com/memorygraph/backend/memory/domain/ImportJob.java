@@ -96,6 +96,12 @@ public class ImportJob {
         return new ImportJob(id, userId, kind, StorageKey.forImport(userId, id, fileName), fileName, checksum, zone);
     }
 
+    /** Same as {@link #pending(UUID, ImportKind, String, String, String)} when the storage key is already written. */
+    public static ImportJob pending(UUID id, UUID userId, ImportKind kind, StorageKey storageKey, String fileName,
+            String checksum, String zone) {
+        return new ImportJob(id, userId, kind, storageKey, fileName, checksum, zone);
+    }
+
     public StorageKey key() {
         return new StorageKey(storageKey);
     }

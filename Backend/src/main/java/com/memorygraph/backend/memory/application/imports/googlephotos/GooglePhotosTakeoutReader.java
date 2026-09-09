@@ -1,21 +1,19 @@
 package com.memorygraph.backend.memory.application.imports.googlephotos;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HexFormat;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.zip.ZipFile;
 
 import org.springframework.stereotype.Component;
 
@@ -23,10 +21,13 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Opens a Google Takeout zip of Google Photos and yields image bytes plus optional sidecar metadata.
+ * Opens a Google Takeout zip of Google Photos and yields image paths plus optional sidecar metadata.
  * <p>
  * Live Library API sync of a user's whole library is no longer available to third-party apps; Takeout
  * (or the Photos Picker for interactive selection) is the supported path.
+ * <p>
+ * Image bytes stay on disk until each photo is imported. A 250&nbsp;MB zip is not inflated into the
+ * heap.
  */
 @Component
 public class GooglePhotosTakeoutReader {
@@ -43,25 +44,37 @@ public class GooglePhotosTakeoutReader {
     public record PhotoEntry(
             String relativePath,
             String fileName,
-            byte[] bytes,
             Instant takenAt,
             Double latitude,
             Double longitude) {
     }
 
-    public record OpenedTakeout(List<PhotoEntry> photos, String checksum) {
-    }
+    public record OpenedTakeout(ZipFile zip, Map<String, ZipEntry> entriesByPath, List<PhotoEntry> photos)
+            implements AutoCloseable {
 
-    public OpenedTakeout open(byte[] zipBytes, String originalFileName) throws IOException {
-        String lower = originalFileName == null ? "" : originalFileName.toLowerCase(Locale.ROOT);
-        if (!lower.endsWith(".zip") && !looksLikeZip(zipBytes)) {
-            throw new IllegalArgumentException("Google Photos Takeout must be a .zip archive");
+        public byte[] readPhoto(PhotoEntry photo) throws IOException {
+            ZipEntry entry = entriesByPath.get(photo.relativePath());
+            if (entry == null) {
+                return new byte[0];
+            }
+            try (InputStream in = zip.getInputStream(entry)) {
+                return readLimited(in);
+            }
         }
 
-        Map<String, byte[]> files = new LinkedHashMap<>();
-        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
-            ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
+        @Override
+        public void close() throws IOException {
+            zip.close();
+        }
+    }
+
+    /** Rejects empty or oversized Takeouts without loading image bytes. */
+    public void requirePhotos(Path zipPath) throws IOException {
+        try (ZipFile zip = new ZipFile(zipPath.toFile(), StandardCharsets.UTF_8)) {
+            int count = 0;
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
                 if (entry.isDirectory()) {
                     continue;
                 }
@@ -69,49 +82,80 @@ public class GooglePhotosTakeoutReader {
                 if (baseName(name).startsWith("._") || name.contains("__MACOSX/")) {
                     continue;
                 }
-                files.put(name, readLimited(zip));
+                if (isImagePath(name)) {
+                    count++;
+                    if (count > MAX_PHOTOS) {
+                        throw new IllegalArgumentException(
+                                "Takeout contains more than " + MAX_PHOTOS
+                                        + " photos; split the export or raise the limit");
+                    }
+                }
             }
-        }
-
-        List<PhotoEntry> photos = new ArrayList<>();
-        for (Map.Entry<String, byte[]> file : files.entrySet()) {
-            String path = file.getKey();
-            if (!isImagePath(path)) {
-                continue;
-            }
-            if (photos.size() >= MAX_PHOTOS) {
+            if (count == 0) {
                 throw new IllegalArgumentException(
-                        "Takeout contains more than " + MAX_PHOTOS + " photos; split the export or raise the limit");
+                        "Zip does not contain any photos. Export Google Photos via Google Takeout and upload that zip.");
             }
-            SidecarMeta meta = readSidecar(files, path);
-            photos.add(new PhotoEntry(path, baseName(path), file.getValue(), meta.takenAt(), meta.latitude(),
-                    meta.longitude()));
         }
-
-        if (photos.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Zip does not contain any photos. Export Google Photos via Google Takeout and upload that zip.");
-        }
-
-        return new OpenedTakeout(List.copyOf(photos), sha256Hex(zipBytes));
     }
 
-    private SidecarMeta readSidecar(Map<String, byte[]> files, String imagePath) {
+    public OpenedTakeout openStored(Path zipPath) throws IOException {
+        ZipFile zip = new ZipFile(zipPath.toFile(), StandardCharsets.UTF_8);
+        try {
+            Map<String, ZipEntry> index = new LinkedHashMap<>();
+            Enumeration<? extends ZipEntry> zipEntries = zip.entries();
+            while (zipEntries.hasMoreElements()) {
+                ZipEntry entry = zipEntries.nextElement();
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                String name = normalisePath(entry.getName());
+                if (baseName(name).startsWith("._") || name.contains("__MACOSX/")) {
+                    continue;
+                }
+                index.put(name, entry);
+            }
+
+            List<PhotoEntry> photos = new ArrayList<>();
+            for (String path : index.keySet()) {
+                if (!isImagePath(path)) {
+                    continue;
+                }
+                if (photos.size() >= MAX_PHOTOS) {
+                    throw new IllegalArgumentException(
+                            "Takeout contains more than " + MAX_PHOTOS + " photos; split the export or raise the limit");
+                }
+                SidecarMeta meta = readSidecar(zip, index, path);
+                photos.add(new PhotoEntry(path, baseName(path), meta.takenAt(), meta.latitude(), meta.longitude()));
+            }
+
+            if (photos.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Zip does not contain any photos. Export Google Photos via Google Takeout and upload that zip.");
+            }
+
+            return new OpenedTakeout(zip, Map.copyOf(index), List.copyOf(photos));
+        } catch (Exception | Error ex) {
+            zip.close();
+            throw ex;
+        }
+    }
+
+    private SidecarMeta readSidecar(ZipFile zip, Map<String, ZipEntry> files, String imagePath) {
         String[] candidates = {
                 imagePath + ".json",
                 replaceExtension(imagePath, ".json"),
                 imagePath + ".supplemental-metadata.json"
         };
         for (String candidate : candidates) {
-            byte[] raw = files.get(candidate);
-            if (raw == null) {
-                // Takeout sometimes uses the basename only under the same folder.
-                raw = files.get(parentDir(imagePath) + baseName(candidate));
+            ZipEntry entry = files.get(candidate);
+            if (entry == null) {
+                entry = files.get(parentDir(imagePath) + baseName(candidate));
             }
-            if (raw == null) {
+            if (entry == null) {
                 continue;
             }
-            try {
+            try (InputStream in = zip.getInputStream(entry)) {
+                byte[] raw = readLimited(in);
                 JsonNode root = json.readTree(raw);
                 Instant taken = null;
                 JsonNode photoTaken = root.path("photoTakenTime").path("timestamp");
@@ -171,11 +215,7 @@ public class GooglePhotosTakeoutReader {
         return path + newExt;
     }
 
-    private static boolean looksLikeZip(byte[] bytes) {
-        return bytes.length >= 4 && bytes[0] == 'P' && bytes[1] == 'K';
-    }
-
-    private static byte[] readLimited(InputStream in) throws IOException {
+    static byte[] readLimited(InputStream in) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buf = new byte[8192];
         int total = 0;
@@ -188,13 +228,5 @@ public class GooglePhotosTakeoutReader {
             out.write(buf, 0, n);
         }
         return out.toByteArray();
-    }
-
-    private static String sha256Hex(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException(ex);
-        }
     }
 }
