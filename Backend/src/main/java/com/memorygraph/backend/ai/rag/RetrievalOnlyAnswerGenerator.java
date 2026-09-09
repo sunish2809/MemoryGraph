@@ -24,7 +24,7 @@ class RetrievalOnlyAnswerGenerator implements AnswerGenerator {
                     + "so here is what the retrieved memories say:\n";
 
     @Override
-    public GeneratedAnswer generate(String question, List<AskSource> sources) {
+    public GeneratedAnswer generate(java.util.UUID userId, String question, List<AskSource> sources) {
         return generate(sources, UNCONFIGURED);
     }
 
@@ -34,6 +34,12 @@ class RetrievalOnlyAnswerGenerator implements AnswerGenerator {
      */
     GeneratedAnswer generateWhenUnavailable(List<AskSource> sources) {
         return generate(sources, UNAVAILABLE);
+    }
+
+    GeneratedAnswer generateWhenQuotaExceeded(List<AskSource> sources) {
+        return generate(
+                sources,
+                "This account has used its monthly AI answers, so here is what the retrieved memories say:\n");
     }
 
     private GeneratedAnswer generate(List<AskSource> sources, String intro) {

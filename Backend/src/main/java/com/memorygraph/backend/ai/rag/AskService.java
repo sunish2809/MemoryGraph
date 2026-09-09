@@ -32,6 +32,7 @@ public class AskService {
     private final AskSourceEnricher enricher;
     private final AnswerGenerator answers;
     private final RetrievalOnlyAnswerGenerator retrievalOnly;
+    private final AskQuotaService quota;
 
     @Transactional(readOnly = true)
     public AskResult ask(
@@ -48,10 +49,30 @@ public class AskService {
         log.info("Ask for user {} retrieved {} source(s) ({} after enrich) for question length {}",
                 userId, retrieved.size(), sources.size(), normalised.length());
 
+        if (!quota.hasAllowance(userId)) {
+            AnswerGenerator.GeneratedAnswer fallback = retrievalOnly.generateWhenQuotaExceeded(sources);
+            return new AskResult(
+                    normalised,
+                    fallback.answer(),
+                    fallback.grounded(),
+                    fallback.model(),
+                    quotaNotice(),
+                    sources);
+        }
+
         try {
-            AnswerGenerator.GeneratedAnswer generated = answers.generate(normalised, sources);
+            AnswerGenerator.GeneratedAnswer generated = answers.generate(userId, normalised, sources);
             return new AskResult(
                     normalised, generated.answer(), generated.grounded(), generated.model(), null, sources);
+        } catch (AskQuotaExceededException ex) {
+            AnswerGenerator.GeneratedAnswer fallback = retrievalOnly.generateWhenQuotaExceeded(sources);
+            return new AskResult(
+                    normalised,
+                    fallback.answer(),
+                    fallback.grounded(),
+                    fallback.model(),
+                    quotaNotice(),
+                    sources);
         } catch (AnswerGenerationException ex) {
             log.warn("Ask generation failed; falling back to retrieval-only: {}", ex.getMessage());
             AnswerGenerator.GeneratedAnswer fallback = retrievalOnly.generateWhenUnavailable(sources);
@@ -63,6 +84,10 @@ public class AskService {
                     notice(ex),
                     sources);
         }
+    }
+
+    private static String quotaNotice() {
+        return "You've used this month's AI answers on this account. Matching memories are listed instead.";
     }
 
     private static String notice(AnswerGenerationException ex) {

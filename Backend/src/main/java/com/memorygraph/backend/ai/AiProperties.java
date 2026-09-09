@@ -23,6 +23,11 @@ public record AiProperties(
         @NotBlank String chatModel,
         @Positive int dimensions,
         @Min(1) @Max(50) int askTopK,
+        /**
+         * Language-model Ask calls allowed per account per UTC month. {@code 0} means unlimited.
+         * Retrieval-only answers (no OpenAI) never count.
+         */
+        @Min(0) int askMonthlyLimit,
         /** Zero is allowed: tests want deterministic, non-creative answers. */
         @DecimalMin("0.0") double chatTemperature,
         /**

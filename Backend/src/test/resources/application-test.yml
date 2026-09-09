@@ -31,6 +31,7 @@ memorygraph:
     chat-model: gpt-4o-mini
     dimensions: 1536
     ask-top-k: 5
+    ask-monthly-limit: 0
     chat-temperature: 0.0
     max-semantic-distance: 0.45
 

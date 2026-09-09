@@ -2,6 +2,7 @@ package com.memorygraph.backend.memory.api.dto;
 
 import java.util.List;
 
+import com.memorygraph.backend.ai.rag.AskQuotaStatus;
 import com.memorygraph.backend.ai.rag.AskResult;
 
 /**
@@ -14,15 +15,17 @@ public record AskResponse(
         boolean grounded,
         String model,
         String notice,
-        List<AskSourceResponse> sources) {
+        List<AskSourceResponse> sources,
+        AskQuotaResponse quota) {
 
-    public static AskResponse from(AskResult result) {
+    public static AskResponse from(AskResult result, AskQuotaStatus quota) {
         return new AskResponse(
                 result.question(),
                 result.answer(),
                 result.grounded(),
                 result.model(),
                 result.notice(),
-                result.sources().stream().map(AskSourceResponse::from).toList());
+                result.sources().stream().map(AskSourceResponse::from).toList(),
+                AskQuotaResponse.from(quota));
     }
 }

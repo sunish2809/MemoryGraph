@@ -54,15 +54,20 @@ class OpenAiGroundedAnswerGenerator implements AnswerGenerator {
 
     private final ChatModel chatModel;
     private final AiProperties properties;
+    private final AskQuotaService quota;
 
     @Override
-    public GeneratedAnswer generate(String question, List<AskSource> sources) {
+    public GeneratedAnswer generate(java.util.UUID userId, String question, List<AskSource> sources) {
         if (sources.isEmpty()) {
             return new GeneratedAnswer(
                     "I could not find anything in your memories that answers that. Try different words, "
                             + "or add the memory if it is not saved yet.",
                     false,
                     properties.chatModel());
+        }
+
+        if (!quota.consumeLanguageModelCall(userId)) {
+            throw new AskQuotaExceededException();
         }
 
         String context = IntStream.range(0, sources.size())

@@ -133,6 +133,8 @@ memorygraph:
     chat-model: ${AI_CHAT_MODEL:gpt-4o-mini}
     dimensions: ${AI_EMBEDDING_DIMENSIONS:1536}
     ask-top-k: ${AI_ASK_TOP_K:12}
+    # Language-model Asks per account per UTC month. 0 = unlimited. Retrieval-only does not count.
+    ask-monthly-limit: ${ASK_MONTHLY_LIMIT:20}
     chat-temperature: ${AI_CHAT_TEMPERATURE:0.2}
     transcription-model: ${AI_TRANSCRIPTION_MODEL:whisper-1}
     # Cosine distance ceiling for semantic hits (0 = identical, ~0.3–0.5 = related with OpenAI).

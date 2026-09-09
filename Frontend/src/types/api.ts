@@ -351,6 +351,15 @@ export interface AskSource {
   relatedPhotos: AskRelatedPhoto[]
 }
 
+export interface AskQuota {
+  capped: boolean
+  limit: number
+  used: number
+  remaining: number
+  periodStart?: string
+  resetsOn?: string
+}
+
 export interface AskResponse {
   question: string
   answer: string
@@ -358,6 +367,7 @@ export interface AskResponse {
   model: string
   notice?: string
   sources: AskSource[]
+  quota: AskQuota
 }
 
 export type ImportKind = 'WHATSAPP' | 'GOOGLE_PHOTOS' | 'GOOGLE_PHOTOS_PICKER'

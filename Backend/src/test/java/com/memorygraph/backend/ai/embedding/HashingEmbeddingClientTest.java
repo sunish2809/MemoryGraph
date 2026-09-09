@@ -10,7 +10,7 @@ import com.memorygraph.backend.ai.AiProperties;
 class HashingEmbeddingClientTest {
 
     private final EmbeddingClient client = new HashingEmbeddingClient(
-            new AiProperties("text-embedding-3-small", "gpt-4o-mini", 32, 5, 0.0, 0.45));
+            new AiProperties("text-embedding-3-small", "gpt-4o-mini", 32, 5, 0, 0.0, 0.45));
 
     @Test
     void isDeterministicForTheSameText() {

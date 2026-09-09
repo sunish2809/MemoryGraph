@@ -3,17 +3,20 @@ package com.memorygraph.backend.memory.api;
 import java.time.ZoneId;
 
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.memorygraph.backend.ai.rag.AskQuotaService;
 import com.memorygraph.backend.ai.rag.AskService;
 import com.memorygraph.backend.auth.security.CurrentUser;
 import com.memorygraph.backend.common.api.ApiPaths;
 import com.memorygraph.backend.common.api.ApiResponse;
 import com.memorygraph.backend.common.time.LocalDayRange;
 import com.memorygraph.backend.common.time.ViewerZone;
+import com.memorygraph.backend.memory.api.dto.AskQuotaResponse;
 import com.memorygraph.backend.memory.api.dto.AskRequest;
 import com.memorygraph.backend.memory.api.dto.AskResponse;
 
@@ -34,13 +37,21 @@ import lombok.RequiredArgsConstructor;
 public class AskController {
 
     private final AskService askService;
+    private final AskQuotaService askQuota;
+
+    @GetMapping("/quota")
+    public ApiResponse<AskQuotaResponse> quota() {
+        return ApiResponse.success(AskQuotaResponse.from(askQuota.status(CurrentUser.requireId())));
+    }
 
     @PostMapping
     public ApiResponse<AskResponse> ask(@Valid @RequestBody AskRequest request) {
         ZoneId zone = ViewerZone.parse(request.zone() == null || request.zone().isBlank() ? "UTC" : request.zone());
         LocalDayRange range = LocalDayRange.of(request.from(), request.to(), zone);
+        var userId = CurrentUser.requireId();
 
         return ApiResponse.success(AskResponse.from(
-                askService.ask(CurrentUser.requireId(), request.question(), request.type(), range, zone)));
+                askService.ask(userId, request.question(), request.type(), range, zone),
+                askQuota.status(userId)));
     }
 }

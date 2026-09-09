@@ -9,10 +9,11 @@ import { Panel } from '@/components/ui/Panel'
 import { accountApi } from '@/features/account/accountApi'
 import { AskBar } from '@/features/ask/AskBar'
 import { AskSourceCard } from '@/features/ask/AskSourceCard'
+import { askApi } from '@/features/ask/askApi'
 import { useAsk } from '@/features/ask/useAsk'
 import { ApiRequestError } from '@/lib/ApiRequestError'
 import { VIEWER_TIME_ZONE } from '@/lib/format'
-import type { AskSource } from '@/types/api'
+import type { AskQuota, AskSource } from '@/types/api'
 
 /**
  * Ask: retrieve relevant memories, then answer from them.
@@ -27,31 +28,34 @@ export function AskPage() {
     queryKey: ['account', 'privacy'],
     queryFn: accountApi.privacy,
   })
+  const { data: loadedQuota } = useQuery({
+    queryKey: ['ask', 'quota'],
+    queryFn: askApi.quota,
+  })
+  const quota = result?.quota ?? loadedQuota
   const chatOn = privacy?.languageModelEnabled
-  const emptyDescription =
-    chatOn === true
-      ? 'Answers are grounded in memories you have saved. If OpenAI is unavailable, you still get the matching memories listed.'
-      : chatOn === false
-        ? 'A language model is not configured on this server. Ask still searches your archive and lists the matching memories instead of paraphrasing them.'
-        : 'Answers are grounded in memories you have saved. Chat days show messages; photos show images.'
+  const emptyDescription = askEmptyDescription(chatOn, quota)
 
   return (
     <PageShell
       title="Ask AI"
       description="Questions are answered from your own memories, with chat lines and photos shown as sources."
       toolbar={
-        <AskBar
-          autoFocus
-          value={draft}
-          onChange={setDraft}
-          onSubmit={() => {
-            const trimmed = draft.trim()
-            if (trimmed) {
-              ask.mutate({ question: trimmed, zone: VIEWER_TIME_ZONE })
-            }
-          }}
-          isLoading={ask.isPending}
-        />
+        <div className="flex flex-col gap-2">
+          <AskBar
+            autoFocus
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => {
+              const trimmed = draft.trim()
+              if (trimmed) {
+                ask.mutate({ question: trimmed, zone: VIEWER_TIME_ZONE })
+              }
+            }}
+            isLoading={ask.isPending}
+          />
+          {quotaMeter(quota)}
+        </div>
       }
     >
       {!result && !ask.isPending && !requestError && (
@@ -102,6 +106,28 @@ export function AskPage() {
       )}
     </PageShell>
   )
+}
+
+function askEmptyDescription(chatOn: boolean | undefined, quota: AskQuota | undefined): string {
+  if (chatOn === false) {
+    return 'A language model is not configured on this server. Ask still searches your archive and lists the matching memories instead of paraphrasing them.'
+  }
+  if (quota?.capped && quota.remaining === 0) {
+    return 'This account has used this month’s AI answers. Ask still searches your archive and lists the matching memories.'
+  }
+  if (chatOn === true) {
+    return 'Answers are grounded in memories you have saved. If OpenAI is unavailable, you still get the matching memories listed.'
+  }
+  return 'Answers are grounded in memories you have saved. Chat days show messages; photos show images.'
+}
+
+function quotaMeter(quota: AskQuota | undefined) {
+  if (!quota?.capped) return null
+  const label =
+    quota.remaining === 0
+      ? `This month’s ${quota.limit} AI answers are used. Matching memories are still listed.`
+      : `${quota.remaining} of ${quota.limit} AI answers left this month`
+  return <p className="text-xs text-fg-muted">{label}</p>
 }
 
 /** Photos already shown under a chat day are not repeated as standalone cards. */
