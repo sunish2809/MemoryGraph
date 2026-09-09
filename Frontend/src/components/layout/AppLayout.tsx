@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
+import { BackButton } from '@/components/layout/BackButton'
 import { NetworkBackdrop } from '@/components/layout/NetworkBackdrop'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/features/auth/useAuth'
@@ -61,12 +62,15 @@ export function AppLayout() {
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line/40 bg-surface/18 px-4 py-3 backdrop-blur-md sm:px-5">
-            <div className="lg:hidden">
-              <Wordmark compact />
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <BackButton />
+              <div className="lg:hidden">
+                <Wordmark compact />
+              </div>
+              <p className="hidden text-xs tracking-[0.18em] text-fg-muted uppercase sm:block">
+                Private archive
+              </p>
             </div>
-            <p className="hidden text-xs tracking-[0.18em] text-fg-muted uppercase sm:block lg:ml-0">
-              Private archive
-            </p>
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden text-right sm:block">
                 <p className="text-sm font-medium text-fg">{user?.displayName}</p>

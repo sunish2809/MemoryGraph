@@ -131,7 +131,7 @@ function ThreadMessage({ turn, pending }: { turn: ThreadTurn; pending: boolean }
   return (
     <article className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <p className="max-w-[min(100%,42rem)] rounded-2xl rounded-br-md bg-accent-muted px-4 py-2.5 text-sm leading-relaxed text-fg">
+        <p className="max-w-[min(100%,56rem)] rounded-2xl rounded-br-md bg-accent-muted px-4 py-2.5 text-sm leading-relaxed text-fg">
           {turn.question}
         </p>
       </div>
@@ -139,14 +139,14 @@ function ThreadMessage({ turn, pending }: { turn: ThreadTurn; pending: boolean }
       {turn.error && <Alert>{turn.error}</Alert>}
 
       {pending && (
-        <div className="max-w-[min(100%,42rem)] space-y-2" aria-busy aria-label="Thinking">
+        <div className="max-w-[min(100%,56rem)] space-y-2" aria-busy aria-label="Thinking">
           <div className="h-4 w-40 animate-pulse rounded bg-surface-raised/70" />
           <div className="h-24 animate-pulse rounded-xl bg-surface-raised/50" />
         </div>
       )}
 
       {result && (
-        <div className="flex max-w-[min(100%,46rem)] flex-col gap-3">
+        <div className="flex w-full max-w-5xl flex-col gap-3">
           {result.notice && <Alert tone="info">{result.notice}</Alert>}
           <div className="rounded-2xl rounded-tl-md border border-line/70 bg-surface/55 px-4 py-4 sm:px-5">
             <p className="mb-3 text-xs text-fg-muted">
