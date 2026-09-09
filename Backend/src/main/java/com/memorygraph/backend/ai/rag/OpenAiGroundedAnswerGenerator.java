@@ -49,6 +49,10 @@ class OpenAiGroundedAnswerGenerator implements AnswerGenerator {
               when a caption or description is present. Hinglish or Hindi text may appear — quote it as-is.
             - If the memories are not enough to answer, say so plainly and suggest what kind of memory would help.
             - Prefer short, direct answers. Cite memories by their bracketed number, e.g. [1], when you draw on them.
+            - Format with short headings (##) and bullet lists. Use **bold** for names, prices, and dates. Do not
+              wrap the whole reply in a numbered outline unless the user asked for steps.
+            - Follow-up questions refer to this conversation. Resolve words like "that", "it", or "the cheaper one"
+              from the prior turns together with the memories.
             - Never claim access to anything outside the provided memories.
             """;
 
@@ -57,7 +61,8 @@ class OpenAiGroundedAnswerGenerator implements AnswerGenerator {
     private final AskQuotaService quota;
 
     @Override
-    public GeneratedAnswer generate(java.util.UUID userId, String question, List<AskSource> sources) {
+    public GeneratedAnswer generate(
+            java.util.UUID userId, String question, List<AskSource> sources, List<AskConversationTurn> history) {
         if (sources.isEmpty()) {
             return new GeneratedAnswer(
                     "I could not find anything in your memories that answers that. Try different words, "
@@ -74,7 +79,8 @@ class OpenAiGroundedAnswerGenerator implements AnswerGenerator {
                 .mapToObj(i -> formatSource(i + 1, sources.get(i)))
                 .collect(Collectors.joining("\n\n"));
 
-        String user = "Memories:\n" + context + "\n\nQuestion: " + question;
+        String user = formatConversation(history)
+                + "Memories:\n" + context + "\n\nQuestion: " + question;
 
         try {
             String answer = chatModel.call(new Prompt(List.of(
@@ -94,6 +100,31 @@ class OpenAiGroundedAnswerGenerator implements AnswerGenerator {
                     : "The answer could not be generated right now";
             throw new AnswerGenerationException(detail, ex);
         }
+    }
+
+    private static String formatConversation(List<AskConversationTurn> history) {
+        if (history == null || history.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder("Conversation so far:\n");
+        int included = 0;
+        List<AskConversationTurn> recent = history.size() > 8
+                ? history.subList(history.size() - 8, history.size())
+                : history;
+        for (AskConversationTurn turn : recent) {
+            if (!StringUtils.hasText(turn.content())) {
+                continue;
+            }
+            builder.append(turn.isUser() ? "User: " : "Assistant: ")
+                    .append(truncate(turn.content(), 1200))
+                    .append('\n');
+            included++;
+        }
+        if (included == 0) {
+            return "";
+        }
+        builder.append('\n');
+        return builder.toString();
     }
 
     private static String formatSource(int index, AskSource source) {

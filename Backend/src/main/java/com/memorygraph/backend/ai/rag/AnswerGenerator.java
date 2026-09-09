@@ -10,7 +10,8 @@ import java.util.List;
  */
 public interface AnswerGenerator {
 
-    GeneratedAnswer generate(java.util.UUID userId, String question, List<AskSource> sources);
+    GeneratedAnswer generate(
+            java.util.UUID userId, String question, List<AskSource> sources, List<AskConversationTurn> history);
 
     record GeneratedAnswer(String answer, boolean grounded, String model) {
     }

@@ -58,7 +58,7 @@ class AskServiceFallbackTest {
         AskSource source = AskSource.of(memory);
         when(retriever.retrieve(any(SearchCriteria.class))).thenReturn(List.of(memory));
         when(enricher.enrich(any(), anyList(), any())).thenReturn(List.of(source));
-        when(answers.generate(eq(userId), anyString(), anyList()))
+        when(answers.generate(eq(userId), anyString(), anyList(), anyList()))
                 .thenThrow(new AnswerGenerationException(
                         "OpenAI rejected the request (quota or billing). Check your API plan, then try Ask again.",
                         null));
@@ -95,10 +95,21 @@ class AskServiceFallbackTest {
                 LocalDayRange.of(null, null, ZoneOffset.UTC),
                 ZoneOffset.UTC);
 
-        verify(answers, never()).generate(any(), anyString(), anyList());
+        verify(answers, never()).generate(any(), anyString(), anyList(), anyList());
         assertThat(result.model()).isEqualTo("retrieval-only");
         assertThat(result.notice()).contains("this month");
         assertThat(result.answer()).contains("Sikkim trip");
         assertThat(result.answer()).contains("monthly AI answers");
+    }
+
+    @Test
+    void foldsPriorUserQuestionsIntoRetrievalSoFollowUpsStayOnTopic() {
+        assertThat(AskService.retrievalQuery(
+                        "the cheaper one",
+                        List.of(
+                                new AskConversationTurn("user", "What was my Bhutan trip?"),
+                                new AskConversationTurn("assistant", "There were 7-day and 5-day options."))))
+                .contains("Bhutan")
+                .contains("the cheaper one");
     }
 }

@@ -24,7 +24,8 @@ class RetrievalOnlyAnswerGenerator implements AnswerGenerator {
                     + "so here is what the retrieved memories say:\n";
 
     @Override
-    public GeneratedAnswer generate(java.util.UUID userId, String question, List<AskSource> sources) {
+    public GeneratedAnswer generate(
+            java.util.UUID userId, String question, List<AskSource> sources, List<AskConversationTurn> history) {
         return generate(sources, UNCONFIGURED);
     }
 

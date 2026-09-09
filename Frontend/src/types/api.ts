@@ -325,6 +325,12 @@ export interface AskRequest {
   to?: string | undefined
   zone?: string | undefined
   type?: MemoryType[] | undefined
+  history?: AskHistoryTurn[] | undefined
+}
+
+export interface AskHistoryTurn {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 export interface AskRelatedPhoto {

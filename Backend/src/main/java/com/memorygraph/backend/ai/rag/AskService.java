@@ -37,12 +37,25 @@ public class AskService {
     @Transactional(readOnly = true)
     public AskResult ask(
             UUID userId, String question, List<MemoryType> types, LocalDayRange range, ZoneId zone) {
+        return ask(userId, question, types, range, zone, List.of());
+    }
+
+    @Transactional(readOnly = true)
+    public AskResult ask(
+            UUID userId,
+            String question,
+            List<MemoryType> types,
+            LocalDayRange range,
+            ZoneId zone,
+            List<AskConversationTurn> history) {
         if (!StringUtils.hasText(question)) {
             throw new IllegalArgumentException("question must not be blank");
         }
         String normalised = question.strip();
+        List<AskConversationTurn> prior = history == null ? List.of() : List.copyOf(history);
 
-        SearchCriteria criteria = SearchCriteria.of(userId, normalised, types, range, SearchSort.RELEVANCE);
+        SearchCriteria criteria = SearchCriteria.of(
+                userId, retrievalQuery(normalised, prior), types, range, SearchSort.RELEVANCE);
         List<Memory> retrieved = retriever.retrieve(criteria);
         List<AskSource> sources = enricher.enrich(userId, retrieved, zone);
 
@@ -61,7 +74,7 @@ public class AskService {
         }
 
         try {
-            AnswerGenerator.GeneratedAnswer generated = answers.generate(userId, normalised, sources);
+            AnswerGenerator.GeneratedAnswer generated = answers.generate(userId, normalised, sources, prior);
             return new AskResult(
                     normalised, generated.answer(), generated.grounded(), generated.model(), null, sources);
         } catch (AskQuotaExceededException ex) {
@@ -84,6 +97,28 @@ public class AskService {
                     notice(ex),
                     sources);
         }
+    }
+
+    /**
+     * Follow-ups like "the cheaper one" have no place names. Fold recent user questions into retrieval
+     * so the same trip memories still surface.
+     */
+    static String retrievalQuery(String question, List<AskConversationTurn> history) {
+        if (history == null || history.isEmpty()) {
+            return question;
+        }
+        String priorUsers = history.stream()
+                .filter(AskConversationTurn::isUser)
+                .map(AskConversationTurn::content)
+                .filter(StringUtils::hasText)
+                .map(String::strip)
+                .reduce((left, right) -> left + " " + right)
+                .orElse("");
+        if (priorUsers.isEmpty()) {
+            return question;
+        }
+        String combined = priorUsers + " " + question;
+        return combined.length() <= 1000 ? combined : combined.substring(combined.length() - 1000);
     }
 
     private static String quotaNotice() {

@@ -2,8 +2,7 @@ package com.memorygraph.backend.memory.api.dto;
 
 import java.util.List;
 
-import com.memorygraph.backend.ai.rag.AskResult;
-
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -17,5 +16,7 @@ public record AskRequest(
         /** IANA timezone for {@code from}/{@code to}. Defaults to UTC when omitted. */
         String zone,
         /** Optional type filter; omitted means every type. */
-        List<com.memorygraph.backend.memory.domain.MemoryType> type) {
+        List<com.memorygraph.backend.memory.domain.MemoryType> type,
+        /** Earlier turns in this thread so a follow-up can refer to the last answer. */
+        @Size(max = 12) List<@Valid AskHistoryTurn> history) {
 }

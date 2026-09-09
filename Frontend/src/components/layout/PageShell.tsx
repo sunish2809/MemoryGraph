@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 
 type PageShellProps = {
   title: string
@@ -6,6 +6,7 @@ type PageShellProps = {
   actions?: ReactNode
   toolbar?: ReactNode
   footer?: ReactNode
+  bodyRef?: Ref<HTMLDivElement>
   children: ReactNode
 }
 
@@ -13,7 +14,7 @@ type PageShellProps = {
  * Fixed-height page chrome: sticky title/toolbar, scrollable body, sticky footer (e.g. pagination).
  * Keeps long lists inside a pane so the whole app doesn’t scroll endlessly.
  */
-export function PageShell({ title, description, actions, toolbar, footer, children }: PageShellProps) {
+export function PageShell({ title, description, actions, toolbar, footer, bodyRef, children }: PageShellProps) {
   return (
     <div className="page-enter flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-panel border border-line/50 bg-surface/15 shadow-[0_20px_60px_-40px_rgb(0_0_0_/_0.8)] backdrop-blur-[2px]">
       <header className="shrink-0 border-b border-line/40 bg-surface/35 px-5 py-4 backdrop-blur-sm sm:px-6">
@@ -29,7 +30,7 @@ export function PageShell({ title, description, actions, toolbar, footer, childr
         {toolbar && <div className="mt-4">{toolbar}</div>}
       </header>
 
-      <div className="scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
+      <div ref={bodyRef} className="scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
         {children}
       </div>
 

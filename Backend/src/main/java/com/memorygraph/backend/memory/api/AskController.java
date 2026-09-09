@@ -1,6 +1,7 @@
 package com.memorygraph.backend.memory.api;
 
 import java.time.ZoneId;
+import java.util.List;
 
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.memorygraph.backend.ai.rag.AskConversationTurn;
 import com.memorygraph.backend.ai.rag.AskQuotaService;
 import com.memorygraph.backend.ai.rag.AskService;
 import com.memorygraph.backend.auth.security.CurrentUser;
@@ -51,7 +53,17 @@ public class AskController {
         var userId = CurrentUser.requireId();
 
         return ApiResponse.success(AskResponse.from(
-                askService.ask(userId, request.question(), request.type(), range, zone),
+                askService.ask(userId, request.question(), request.type(), range, zone, toTurns(request.history())),
                 askQuota.status(userId)));
+    }
+
+    private static List<AskConversationTurn> toTurns(
+            List<com.memorygraph.backend.memory.api.dto.AskHistoryTurn> history) {
+        if (history == null || history.isEmpty()) {
+            return List.of();
+        }
+        return history.stream()
+                .map(turn -> new AskConversationTurn(turn.role(), turn.content()))
+                .toList();
     }
 }
