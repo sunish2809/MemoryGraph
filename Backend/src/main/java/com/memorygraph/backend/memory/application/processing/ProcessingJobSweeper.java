@@ -5,6 +5,8 @@ import java.util.List;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.memorygraph.backend.memory.application.face.FaceService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,9 +25,15 @@ public class ProcessingJobSweeper {
 
     private final ProcessingJobTransitions transitions;
     private final ProcessingJobRunner runner;
+    private final FaceService faceService;
 
     @Scheduled(fixedDelayString = "${memorygraph.processing.sweep-interval}")
     public void sweep() {
+        try {
+            faceService.enqueueMissingDetections();
+        } catch (RuntimeException ex) {
+            log.warn("Could not queue missing face-detection jobs: {}", ex.getMessage());
+        }
         List<ClaimedJob> claimed = transitions.claimDue();
         if (claimed.isEmpty()) {
             return;

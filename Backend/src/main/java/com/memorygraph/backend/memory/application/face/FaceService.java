@@ -12,6 +12,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,7 @@ import com.memorygraph.backend.memory.api.dto.FaceReviewResponse;
 import com.memorygraph.backend.memory.api.dto.FaceReviewResponse.FaceClusterGroup;
 import com.memorygraph.backend.memory.api.dto.FaceReviewResponse.FaceReviewItem;
 import com.memorygraph.backend.memory.application.PersonLinkService;
+import com.memorygraph.backend.memory.application.processing.EnrichmentJobEnqueuer;
 import com.memorygraph.backend.memory.application.upload.DisplayableImage;
 import com.memorygraph.backend.memory.application.upload.HeicToJpegConverter;
 import com.memorygraph.backend.memory.application.upload.SupportedMediaType;
@@ -40,6 +42,7 @@ import com.memorygraph.backend.memory.domain.MemoryRepository;
 import com.memorygraph.backend.memory.domain.MemoryType;
 import com.memorygraph.backend.memory.domain.Person;
 import com.memorygraph.backend.memory.domain.PersonRepository;
+import com.memorygraph.backend.memory.domain.ProcessingJobType;
 import com.memorygraph.backend.storage.StorageKey;
 import com.memorygraph.backend.storage.StorageService;
 import com.memorygraph.backend.storage.StoredObject;
@@ -66,6 +69,7 @@ public class FaceService {
     private final FacesProperties properties;
     private final HeicToJpegConverter heicToJpeg;
     private final VideoFrameExtractor videoFrames;
+    private final EnrichmentJobEnqueuer enrichmentJobs;
 
     @Transactional(readOnly = true)
     public List<FaceDetectionResponse> listForMemory(UUID userId, UUID memoryId) {
@@ -130,10 +134,33 @@ public class FaceService {
         return new FaceReviewResponse(unlabeled, suggested, groups);
     }
 
+    /**
+     * Photos imported before face-detect ran as its own step never got a job. Queue a batch so they
+     * are scanned without asking the user to re-upload.
+     */
+    @Transactional
+    public int enqueueMissingDetections() {
+        if (!properties.enabled()) {
+            return 0;
+        }
+        var missing = memories.findMediaMissingFaceDetect(Limit.of(20));
+        for (MemoryRepository.MemoryOwnerId row : missing) {
+            enrichmentJobs.enqueue(row.getId(), row.getUserId(), ProcessingJobType.FACE_DETECT);
+        }
+        if (!missing.isEmpty()) {
+            log.info("Queued face detection for {} photo(s)/video(s) that never had a scan", missing.size());
+        }
+        return missing.size();
+    }
+
     @Transactional
     public void detectForMemory(Memory memory) {
-        if (!detectionClient.isAvailable()) {
+        if (!properties.enabled()) {
             return;
+        }
+        if (!detectionClient.isAvailable()) {
+            throw new IllegalStateException(
+                    "Face service is not reachable at " + properties.serviceUrl());
         }
         if (memory.getType() != MemoryType.PHOTO && memory.getType() != MemoryType.VIDEO) {
             return;

@@ -130,6 +130,7 @@ export function useImportJob(importId: string | undefined) {
       }
       return false
     },
+    refetchIntervalInBackground: true,
     retry: 4,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
   })
@@ -139,7 +140,12 @@ export function useImportList(pollWhileBusy = false) {
   return useQuery({
     queryKey: importKeys.list,
     queryFn: () => importsApi.list(),
-    refetchInterval: pollWhileBusy ? IMPORT_POLL_MS : false,
+    refetchInterval: (query) => {
+      const busy = query.state.data?.some((job) => job.status === 'PENDING' || job.status === 'PROCESSING')
+      if (pollWhileBusy || busy) return IMPORT_POLL_MS
+      return false
+    },
+    refetchIntervalInBackground: true,
   })
 }
 

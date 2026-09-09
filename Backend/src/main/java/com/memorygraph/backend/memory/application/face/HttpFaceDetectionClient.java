@@ -69,8 +69,7 @@ public class HttpFaceDetectionClient implements FaceDetectionClient {
                     .body(String.class);
             return parse(json);
         } catch (RestClientException ex) {
-            log.warn("Face detection request failed: {}", ex.getMessage());
-            return List.of();
+            throw new IllegalStateException("Face detection request failed: " + ex.getMessage(), ex);
         }
     }
 

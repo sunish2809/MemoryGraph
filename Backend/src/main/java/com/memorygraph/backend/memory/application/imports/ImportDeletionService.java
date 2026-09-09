@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -38,33 +39,59 @@ public class ImportDeletionService {
     }
 
     /**
-     * Deletes memories from this import (linked by {@code import_job_id}, plus legacy WhatsApp
-     * matches by chat name), then the job row and stored export bytes.
+     * Stops an in-flight import (the worker notices the job row is gone and quits), deletes memories
+     * created so far, then the job and the stored export.
      */
     @Transactional
     public int delete(UUID userId, UUID importId) {
-        ImportJob job = importJobs.findByIdAndUserId(importId, userId)
+        importJobs.findByIdAndUserId(importId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Import job", importId));
+        ImportJob locked = importJobs.findByIdForUpdate(importId)
                 .orElseThrow(() -> new ResourceNotFoundException("Import job", importId));
 
+        int deleted = deleteLinkedMemories(userId, importId, locked);
+
+        try {
+            storage.delete(locked.key());
+        } catch (RuntimeException ex) {
+            log.warn("Removed import job {} but could not delete export bytes: {}", importId, ex.getMessage());
+        }
+
+        importJobs.delete(locked);
+        deleted += cleanupOrphanedImportMemories();
+        log.info("Deleted import {} for user {} ({} memories)", importId, userId, deleted);
+        return deleted;
+    }
+
+    /** Drops leftovers from a delete that raced an in-flight worker. */
+    @Transactional
+    public int cleanupOrphanedImportMemories() {
+        int deleted = 0;
+        var orphans = memories.findOrphanedImportMemories(Limit.of(50));
+        for (MemoryRepository.MemoryOwnerId row : orphans) {
+            try {
+                memoryService.delete(row.getUserId(), row.getId());
+                deleted++;
+            } catch (RuntimeException ex) {
+                log.warn("Could not delete orphaned import memory {}: {}", row.getId(), ex.getMessage());
+            }
+        }
+        if (deleted > 0) {
+            log.info("Removed {} memories left behind by a deleted import", deleted);
+        }
+        return deleted;
+    }
+
+    private int deleteLinkedMemories(UUID userId, UUID importId, ImportJob job) {
         Set<UUID> memoryIds = new LinkedHashSet<>(memories.findIdsByUserIdAndImportJobId(userId, importId));
         if (StringUtils.hasText(job.getChatName())) {
             memoryIds.addAll(memories.findLegacyWhatsAppImportIds(userId, job.getChatName()));
         }
-
         int deleted = 0;
         for (UUID memoryId : memoryIds) {
             memoryService.delete(userId, memoryId);
             deleted++;
         }
-
-        try {
-            storage.delete(job.key());
-        } catch (RuntimeException ex) {
-            log.warn("Removed import job {} but could not delete export bytes: {}", importId, ex.getMessage());
-        }
-
-        importJobs.delete(job);
-        log.info("Deleted import {} for user {} ({} memories)", importId, userId, deleted);
         return deleted;
     }
 }

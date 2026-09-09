@@ -23,6 +23,7 @@ import com.memorygraph.backend.common.error.ErrorCode;
 import com.memorygraph.backend.common.error.ResourceNotFoundException;
 import com.memorygraph.backend.common.time.ViewerZone;
 import com.memorygraph.backend.memory.application.PersonLinkService;
+import com.memorygraph.backend.memory.application.imports.ImportAbortedException;
 import com.memorygraph.backend.memory.application.imports.ImportJobQueued;
 import com.memorygraph.backend.memory.application.processing.EmbeddingJobEnqueuer;
 import com.memorygraph.backend.memory.application.processing.ProcessingJobQueued;
@@ -186,7 +187,6 @@ public class WhatsAppImportService {
             String selfDisplayName = owner.getDisplayName();
             int created = 0;
             Set<String> importedMedia = new HashSet<>();
-
             for (WhatsAppDayBucketer.DayBucket day : days) {
                 Integer dayCreated = transactions.execute(status -> importOneDay(
                         job, owner, selfDisplayName, chat.chatName(), zone, day, opened, importedMedia));
@@ -206,6 +206,9 @@ public class WhatsAppImportService {
             WhatsAppDayBucketer.DayBucket day,
             WhatsAppExportReader.OpenedExport opened,
             Set<String> importedMedia) {
+        if (importJobs.findByIdForUpdate(job.getId()).isEmpty()) {
+            throw new ImportAbortedException(job.getId());
+        }
         int created = 0;
         Memory conversation = Memory.create(owner, MemoryType.CONVERSATION, MemorySource.IMPORT,
                 WhatsAppDayBucketer.occurredAt(day.firstMessageAt(), zone));

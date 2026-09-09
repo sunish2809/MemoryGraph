@@ -65,18 +65,15 @@ public class MemoryEnrichmentStep {
             memory.markProcessed(ProcessingStatus.COMPLETED);
             if (memory.getType() == MemoryType.AUDIO || memory.getType() == MemoryType.VIDEO) {
                 enrichmentJobs.enqueue(memory.getId(), memory.getUserId(), ProcessingJobType.TRANSCRIPTION);
-                if (memory.getType() == MemoryType.VIDEO) {
-                    enrichmentJobs.enqueue(memory.getId(), memory.getUserId(), ProcessingJobType.FACE_DETECT);
-                }
             } else {
                 enrichmentJobs.enqueue(memory.getId(), memory.getUserId(), ProcessingJobType.OCR);
+            }
+            if (memory.getType() == MemoryType.PHOTO || memory.getType() == MemoryType.VIDEO) {
+                enrichmentJobs.enqueue(memory.getId(), memory.getUserId(), ProcessingJobType.FACE_DETECT);
             }
         } else if (job.getType() == ProcessingJobType.OCR) {
             enrichmentJobs.enqueue(memory.getId(), memory.getUserId(), ProcessingJobType.CAPTION);
         } else if (job.getType() == ProcessingJobType.CAPTION) {
-            if (memory.getType() == MemoryType.PHOTO) {
-                enrichmentJobs.enqueue(memory.getId(), memory.getUserId(), ProcessingJobType.FACE_DETECT);
-            }
             embeddingJobs.enqueue(memory.getId(), memory.getUserId());
         } else if (job.getType() == ProcessingJobType.TRANSCRIPTION) {
             embeddingJobs.enqueue(memory.getId(), memory.getUserId());

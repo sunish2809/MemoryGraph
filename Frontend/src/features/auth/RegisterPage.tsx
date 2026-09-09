@@ -33,7 +33,7 @@ export function RegisterPage() {
         password,
         ...(inviteRequired ? { inviteCode } : {}),
       }),
-    onSuccess: () => navigate('/welcome', { replace: true }),
+    onSuccess: () => navigate('/', { replace: true }),
   })
 
   const error = mutation.error instanceof ApiRequestError ? mutation.error : null

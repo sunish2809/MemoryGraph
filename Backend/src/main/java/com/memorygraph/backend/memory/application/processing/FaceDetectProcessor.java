@@ -7,9 +7,7 @@ import com.memorygraph.backend.memory.domain.Memory;
 import com.memorygraph.backend.memory.domain.ProcessingJobType;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
-@Slf4j
 @Component
 @RequiredArgsConstructor
 public class FaceDetectProcessor implements MemoryProcessor {
@@ -23,11 +21,6 @@ public class FaceDetectProcessor implements MemoryProcessor {
 
     @Override
     public void process(Memory memory) {
-        try {
-            faceService.detectForMemory(memory);
-        } catch (RuntimeException ex) {
-            // Face detection is optional enrichment — never fail the memory.
-            log.warn("Face detection failed for memory {}: {}", memory.getId(), ex.getMessage());
-        }
+        faceService.detectForMemory(memory);
     }
 }

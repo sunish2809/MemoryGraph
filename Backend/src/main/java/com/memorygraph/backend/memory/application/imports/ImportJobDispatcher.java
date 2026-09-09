@@ -25,6 +25,7 @@ public class ImportJobDispatcher {
     private final ImportJobTransitions transitions;
     private final ImportJobRunner runner;
     private final ImportJobRepository jobs;
+    private final ImportDeletionService deletions;
 
     @Async(ProcessingConfig.EXECUTOR_BEAN_NAME)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -35,6 +36,7 @@ public class ImportJobDispatcher {
 
     @Scheduled(fixedDelayString = "${memorygraph.processing.sweep-interval}")
     public void sweep() {
+        deletions.cleanupOrphanedImportMemories();
         for (ImportJob job : jobs.findDuePending()) {
             transitions.claim(job.getId()).ifPresent(runner::run);
         }

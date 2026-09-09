@@ -5,14 +5,21 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 public interface ImportJobRepository extends JpaRepository<ImportJob, UUID> {
 
     Optional<ImportJob> findByIdAndUserId(UUID id, UUID userId);
 
     Optional<ImportJob> findByUserIdAndChecksum(UUID userId, String checksum);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select j from ImportJob j where j.id = :id")
+    Optional<ImportJob> findByIdForUpdate(@Param("id") UUID id);
 
     @Query("""
             select j from ImportJob j

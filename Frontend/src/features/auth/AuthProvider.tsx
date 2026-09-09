@@ -34,26 +34,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     async function restore() {
-      let lastError: unknown
-      for (let attempt = 0; attempt < 4; attempt++) {
+      let attempt = 0
+      while (!cancelled) {
         try {
           const profile = await authApi.me()
           if (!cancelled) setUser(profile)
           return
         } catch (err) {
-          lastError = err
-          if (err instanceof ApiRequestError && err.status === 401) {
+          const rejected =
+            err instanceof ApiRequestError &&
+            err.status === 401 &&
+            (err.code === 'UNAUTHENTICATED' || err.code === 'INVALID_CREDENTIALS')
+          if (rejected || readSession() === null) {
             if (!cancelled) {
               clearSession()
               setUser(null)
             }
             return
           }
-          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
+          attempt += 1
+          const delay = Math.min(8_000, 500 * 2 ** Math.min(attempt, 5))
+          if (attempt === 1 || attempt % 5 === 0) {
+            console.warn('Could not restore session; retrying', err)
+          }
+          await new Promise((r) => setTimeout(r, delay))
         }
-      }
-      if (!cancelled) {
-        console.warn('Could not restore session after retries', lastError)
       }
     }
 

@@ -10,7 +10,7 @@ export function NotFoundPage() {
       <div className="relative z-10 flex flex-col items-center gap-4">
         <p className="text-sm tracking-widest text-fg-muted uppercase">404</p>
         <h1 className="text-2xl font-semibold tracking-tight">This page does not exist</h1>
-        <Link to="/">
+        <Link to="/dashboard">
           <Button variant="secondary">Back to dashboard</Button>
         </Link>
       </div>

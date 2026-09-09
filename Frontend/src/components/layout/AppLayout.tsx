@@ -1,12 +1,15 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 import { NetworkBackdrop } from '@/components/layout/NetworkBackdrop'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/features/auth/useAuth'
+import { useImportList } from '@/features/imports/useImports'
+import { holdIdleLogout } from '@/lib/idleSession'
 
 const navigation = [
-  { to: '/welcome', label: 'Welcome', hint: 'Tour' },
-  { to: '/', label: 'Dashboard', hint: 'Overview' },
+  { to: '/', label: 'Welcome', hint: 'Tour' },
+  { to: '/dashboard', label: 'Dashboard', hint: 'Overview' },
   { to: '/timeline', label: 'Timeline', hint: 'By date' },
   { to: '/search', label: 'Search', hint: 'Find' },
   { to: '/people', label: 'People', hint: 'Who' },
@@ -21,6 +24,7 @@ const navigation = [
 
 export function AppLayout() {
   const { user, logout } = useAuth()
+  useHoldSessionDuringImport()
   const initials = (user?.displayName ?? 'M')
     .split(/\s+/)
     .map((part) => part[0])
@@ -104,6 +108,16 @@ export function AppLayout() {
       </div>
     </div>
   )
+}
+
+/** A long WhatsApp import can run past the idle timer; keep the tab signed in until it finishes. */
+function useHoldSessionDuringImport() {
+  const { data: imports } = useImportList()
+  useEffect(() => {
+    const busy = imports?.some((job) => job.status === 'PENDING' || job.status === 'PROCESSING')
+    if (!busy) return
+    return holdIdleLogout('import-running')
+  }, [imports])
 }
 
 function Wordmark({ compact = false }: { compact?: boolean }) {

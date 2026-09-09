@@ -24,6 +24,7 @@ import {
 } from '@/features/imports/useImports'
 import { ApiRequestError } from '@/lib/ApiRequestError'
 import { formatFileSize, VIEWER_TIME_ZONE } from '@/lib/format'
+import { holdIdleLogout } from '@/lib/idleSession'
 
 type Source = 'whatsapp' | 'google-photos'
 
@@ -86,6 +87,16 @@ export function ImportPage() {
       queryClient.setQueryData(['imports', importId], listed)
     }
   }, [listed, importId, queryClient])
+
+  useEffect(() => {
+    const busy =
+      startPending ||
+      pickerPolling ||
+      liveJob?.status === 'PENDING' ||
+      liveJob?.status === 'PROCESSING'
+    if (!busy) return
+    return holdIdleLogout('import-page')
+  }, [startPending, pickerPolling, liveJob?.status])
 
   useEffect(() => {
     if (pickerSession?.mediaItemsSet) {
@@ -375,7 +386,8 @@ export function ImportPage() {
       {pastImports && pastImports.length > 0 && (
         <Panel title="Past imports">
           <p className="mb-3 text-sm text-fg-muted">
-            Delete an import to remove its memories and free the file for re-upload.
+            Delete an import to stop it if it is still running, remove its memories, and free the
+            file for re-upload.
           </p>
           <ul className="flex flex-col gap-2">
             {pastImports.map((item) => (

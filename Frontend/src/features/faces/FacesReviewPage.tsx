@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -5,6 +6,7 @@ import { PageShell } from '@/components/layout/PageShell'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { accountApi } from '@/features/account/accountApi'
 import { AuthenticatedImage } from '@/features/memories/AuthenticatedImage'
 import { useConfirmFace } from '@/features/memories/useMemories'
 import { usePeople } from '@/features/people/usePeople'
@@ -15,6 +17,14 @@ import type { FaceClusterGroup, FaceReviewItem } from '@/types/api'
 
 export function FacesReviewPage() {
   const { data: review, isPending, error } = useFaceReview()
+  const { data: privacy } = useQuery({
+    queryKey: ['account', 'privacy'],
+    queryFn: accountApi.privacy,
+  })
+
+  const emptyDescription = privacy && privacy.facesEnabled === false
+    ? 'Face detection is turned off on this server. You can still tag people on a memory; boxes will not appear on photos.'
+    : 'Photos are scanned in the background. Open a photo — a box appears when a face is found. Naming someone under People is not the same as confirming a face here.'
 
   return (
     <PageShell
@@ -28,7 +38,7 @@ export function FacesReviewPage() {
         <EmptyState
           icon="◉"
           title="No unlabeled faces"
-          description="When photos and videos are scanned, unnamed faces show up here to confirm, skip as background, or name as a group."
+          description={emptyDescription}
         />
       )}
 

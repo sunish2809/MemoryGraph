@@ -83,7 +83,7 @@ export function WelcomePage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={() => enterArchive('/')}>
+          <Button type="button" onClick={() => enterArchive('/dashboard')}>
             Enter your archive
           </Button>
           <Button type="button" variant="secondary" onClick={() => enterArchive('/import')}>

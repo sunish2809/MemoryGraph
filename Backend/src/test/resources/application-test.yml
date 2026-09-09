@@ -22,6 +22,9 @@ memorygraph:
     queue-capacity: 10
   geocoding:
     enabled: false
+  faces:
+    enabled: false
+    service-url: http://faces:8090
   password-reset:
     token-ttl: PT1H
     public-base-url: http://localhost:3000

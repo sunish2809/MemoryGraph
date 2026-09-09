@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { AppLayout } from '@/components/layout/AppLayout'
 import { RedirectIfAuthenticated, RequireAuth } from '@/components/routing/AuthGuards'
@@ -38,8 +38,9 @@ export function App() {
 
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="/welcome" element={<WelcomePage />} />
+          <Route index element={<WelcomePage />} />
+          <Route path="/welcome" element={<Navigate to="/" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/timeline" element={<TimelinePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/people" element={<PeoplePage />} />

@@ -18,6 +18,7 @@ import com.memorygraph.backend.common.error.ErrorCode;
 import com.memorygraph.backend.common.error.ResourceNotFoundException;
 import com.memorygraph.backend.common.time.ViewerZone;
 import com.memorygraph.backend.memory.application.PlaceLinkService;
+import com.memorygraph.backend.memory.application.imports.ImportAbortedException;
 import com.memorygraph.backend.memory.application.imports.ImportJobQueued;
 import com.memorygraph.backend.memory.application.processing.ProcessingJobQueued;
 import com.memorygraph.backend.memory.application.upload.HeicToJpegConverter;
@@ -123,6 +124,9 @@ public class GooglePhotosImportService {
             int created = 0;
 
             for (GooglePhotosTakeoutReader.PhotoEntry photo : opened.photos()) {
+                if (importJobs.findById(job.getId()).isEmpty()) {
+                    throw new ImportAbortedException(job.getId());
+                }
                 byte[] photoBytes = opened.readPhoto(photo);
                 if (photoBytes.length < SupportedMediaType.SIGNATURE_PROBE_BYTES) {
                     continue;

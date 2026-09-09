@@ -24,6 +24,7 @@ import com.memorygraph.backend.integration.google.GooglePhotosPickerClient;
 import com.memorygraph.backend.integration.google.GooglePhotosPickerClient.PickedMediaItem;
 import com.memorygraph.backend.integration.google.GooglePhotosPickerClient.PickerSession;
 import com.memorygraph.backend.integration.google.api.GooglePickerSessionResponse;
+import com.memorygraph.backend.memory.application.imports.ImportAbortedException;
 import com.memorygraph.backend.memory.application.imports.ImportJobQueued;
 import com.memorygraph.backend.memory.application.processing.ProcessingJobQueued;
 import com.memorygraph.backend.memory.application.upload.HeicToJpegConverter;
@@ -154,6 +155,9 @@ public class GooglePhotosPickerImportService {
                 .toList();
 
         for (PickedMediaItem item : items) {
+            if (importJobs.findById(job.getId()).isEmpty()) {
+                throw new ImportAbortedException(job.getId());
+            }
             if (item.baseUrl() == null) {
                 continue;
             }

@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.memorygraph.backend.common.error.ResourceNotFoundException;
 import com.memorygraph.backend.memory.domain.ImportJob;
 import com.memorygraph.backend.memory.domain.ImportJobRepository;
 import com.memorygraph.backend.memory.domain.ImportJobStatus;
@@ -38,9 +37,7 @@ public class ImportJobTransitions {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void complete(UUID jobId, String chatName, int memoriesCreated) {
-        ImportJob job = jobs.findById(jobId)
-                .orElseThrow(() -> new ResourceNotFoundException("Import job", jobId));
-        job.markCompleted(chatName, memoriesCreated);
+        jobs.findById(jobId).ifPresent(job -> job.markCompleted(chatName, memoriesCreated));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

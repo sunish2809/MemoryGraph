@@ -47,6 +47,8 @@ public class ImportJobRunner {
             transitions.complete(job.getId(), label, created);
             log.info("Import job {} completed with {} memories in {}ms", job.getId(), created,
                     (System.nanoTime() - started) / 1_000_000);
+        } catch (ImportAbortedException ex) {
+            log.info("Import job {} stopped because it was deleted", job.getId());
         } catch (Exception ex) {
             log.error("Import job {} failed after {}ms", job.getId(), (System.nanoTime() - started) / 1_000_000, ex);
             try {

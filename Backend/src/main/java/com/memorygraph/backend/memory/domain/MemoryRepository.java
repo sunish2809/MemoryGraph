@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -120,4 +121,39 @@ public interface MemoryRepository extends JpaRepository<Memory, UUID> {
             @Param("description") String description,
             @Param("fromInstant") Instant fromInstant,
             @Param("toInstant") Instant toInstant);
+
+    interface MemoryOwnerId {
+        UUID getId();
+
+        UUID getUserId();
+    }
+
+    /**
+     * Photos and videos that never got a face-detect job — typically because an older pipeline waited
+     * on captions, or the sidecar was down and the job was skipped.
+     */
+    @Query("""
+            select m.id as id, m.user.id as userId
+            from Memory m
+            where m.type in (com.memorygraph.backend.memory.domain.MemoryType.PHOTO,
+                             com.memorygraph.backend.memory.domain.MemoryType.VIDEO)
+              and not exists (
+                  select 1 from ProcessingJob j
+                  where j.memoryId = m.id
+                    and j.type = com.memorygraph.backend.memory.domain.ProcessingJobType.FACE_DETECT
+              )
+            """)
+    List<MemoryOwnerId> findMediaMissingFaceDetect(Limit limit);
+
+    /**
+     * Memories whose import job was deleted while the worker was still writing. They keep
+     * {@code import_job_id} but the job row is gone, so they otherwise stay on the timeline forever.
+     */
+    @Query("""
+            select m.id as id, m.user.id as userId
+            from Memory m
+            where m.importJobId is not null
+              and not exists (select 1 from ImportJob j where j.id = m.importJobId)
+            """)
+    List<MemoryOwnerId> findOrphanedImportMemories(Limit limit);
 }

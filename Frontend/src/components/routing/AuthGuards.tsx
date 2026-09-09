@@ -1,13 +1,15 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/features/auth/useAuth'
+import { readSession } from '@/lib/session'
 
 /** Blocks the application shell until a session is confirmed, then hands over to the layout. */
 export function RequireAuth() {
   const { isAuthenticated, isRestoring } = useAuth()
   const location = useLocation()
+  const hasToken = readSession() !== null
 
-  if (isRestoring) {
+  if (isRestoring || (hasToken && !isAuthenticated)) {
     return <FullPageLoader />
   }
 
@@ -21,8 +23,9 @@ export function RequireAuth() {
 /** Keeps signed-in users out of the login and register screens. */
 export function RedirectIfAuthenticated() {
   const { isAuthenticated, isRestoring } = useAuth()
+  const hasToken = readSession() !== null
 
-  if (isRestoring) {
+  if (isRestoring || (hasToken && !isAuthenticated)) {
     return <FullPageLoader />
   }
 

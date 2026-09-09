@@ -51,12 +51,13 @@ function toApiRequestError(error: unknown): ApiRequestError {
   const body = (error.response.data as ApiEnvelope<never> | undefined)?.error
 
   if (status === 401) {
-    // Media/blob 401s during overload should not nuke the whole session; only API envelope auth
-    // failures (and /auth/me) should. Callers that want logout already use onSessionExpired via
-    // normal JSON requests — still notify, but avoid double-clear races from parallel image loads.
     const url = String(error.config?.url ?? '')
     const isMedia = error.config?.responseType === 'blob' || url.includes('/media/')
-    if (!isMedia) {
+    const code = body?.code
+    // Only a real auth rejection signs the user out. 401 from a crashed proxy or a missing
+    // envelope during import overload must not dump them on the login screen.
+    const isAuthRejection = code === 'UNAUTHENTICATED' || code === 'INVALID_CREDENTIALS'
+    if (!isMedia && isAuthRejection) {
       clearSession()
       sessionExpiredListeners.forEach((listener) => listener())
     }
