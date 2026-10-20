@@ -28,11 +28,13 @@ export function PlacesMap({
     }
 
     const map = L.map(element, { scrollWheelZoom: false })
-    // Leaflet is free. CARTO's dark tiles now watermark "API key required"; OSM raster
-    // tiles do not. A CSS invert on .places-map keeps the night-archive look.
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19,
+    // Leaflet itself is free. tile.openstreetmap.org often serves a "Blocked" overlay;
+    // OSM Germany's tiles are the same map data and allow general web use. CSS invert
+    // on .places-map keeps the night-archive look without a Carto key.
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, tiles by <a href="https://www.openstreetmap.de/">OSM.de</a>',
+      maxZoom: 18,
     }).addTo(map)
 
     const markers = places.map((place) => {
