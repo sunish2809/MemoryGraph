@@ -1,6 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
+import { demoAuthResult } from '@/demo/demoApi'
+import { enterDemoMode, isDemoMode, leaveDemoMode } from '@/demo/isDemoMode'
 import { AuthContext, type AuthContextValue } from '@/features/auth/AuthContext'
 import { authApi, type LoginPayload, type RegisterPayload } from '@/features/auth/authApi'
 import { onSessionExpired } from '@/lib/api'
@@ -12,7 +14,7 @@ import type { AuthenticationResult, User } from '@/types/api'
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [user, setUser] = useState<User | null>(null)
-  const [isRestoring, setIsRestoring] = useState(() => readSession() !== null)
+  const [isRestoring, setIsRestoring] = useState(() => readSession() !== null || isDemoMode())
 
   const applySession = useCallback((result: AuthenticationResult) => {
     writeSession({ accessToken: result.accessToken, expiresAt: result.expiresAt })
@@ -20,15 +22,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
+    leaveDemoMode()
     clearSession()
     setUser(null)
     // Memories are private: drop anything already fetched so it cannot be read by the next account.
     queryClient.clear()
   }, [queryClient])
 
+  const enterDemo = useCallback(async () => {
+    enterDemoMode()
+    queryClient.clear()
+    applySession(demoAuthResult())
+  }, [applySession, queryClient])
+
   // A stored token is only trusted once the backend confirms it, which also refreshes the profile.
   // Network blips during a heavy import must not wipe the session — only a real 401 does.
   useEffect(() => {
+    if (isDemoMode()) {
+      applySession(demoAuthResult())
+      setIsRestoring(false)
+      return
+    }
     if (readSession() === null) return
 
     let cancelled = false
@@ -74,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => onSessionExpired(logout), [logout])
 
   useEffect(() => {
-    if (!user) return
+    if (!user || isDemoMode()) return
     const stopWatch = startIdleWatch()
     const stopIdle = onIdleTimeout(() => {
       rememberLogoutReason('idle')
@@ -93,9 +107,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: user !== null,
       login: async (payload: LoginPayload) => applySession(await authApi.login(payload)),
       register: async (payload: RegisterPayload) => applySession(await authApi.register(payload)),
+      enterDemo,
       logout,
     }),
-    [applySession, isRestoring, logout, user],
+    [applySession, enterDemo, isRestoring, logout, user],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -10,6 +10,8 @@ export interface AuthContextValue {
   isAuthenticated: boolean
   login: (payload: LoginPayload) => Promise<void>
   register: (payload: RegisterPayload) => Promise<void>
+  /** Sample archive in the browser — no live server. */
+  enterDemo: () => Promise<void>
   logout: () => void
 }
 

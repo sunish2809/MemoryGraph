@@ -2,6 +2,8 @@ import { Link, useNavigate } from 'react-router-dom'
 
 import { ScrollPage } from '@/components/layout/PageShell'
 import { Button } from '@/components/ui/Button'
+import { DemoHostNotice } from '@/demo/DemoHostNotice'
+import { isDemoMode } from '@/demo/isDemoMode'
 import { useAuth } from '@/features/auth/useAuth'
 import { markWelcomeSeen } from '@/lib/welcome'
 
@@ -70,6 +72,7 @@ export function WelcomePage() {
 
   return (
     <ScrollPage>
+      {isDemoMode() && <DemoHostNotice />}
       <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-xl">
           <p className="text-[10px] tracking-[0.2em] text-accent uppercase">Start here</p>

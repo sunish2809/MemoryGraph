@@ -7,6 +7,8 @@ interface ImportMetaEnv {
    * talks to a single origin.
    */
   readonly VITE_API_BASE_URL?: string
+  /** `true` when started with `npm run demo` — sample archive, no backend. */
+  readonly VITE_DEMO_MODE?: string
 }
 
 interface ImportMeta {

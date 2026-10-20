@@ -3,6 +3,8 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 import { BackButton } from '@/components/layout/BackButton'
 import { NetworkBackdrop } from '@/components/layout/NetworkBackdrop'
+import { OWNER_EMAIL } from '@/demo/ownerContact'
+import { isDemoMode } from '@/demo/isDemoMode'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/features/auth/useAuth'
 import { useImportList } from '@/features/imports/useImports'
@@ -61,6 +63,12 @@ export function AppLayout() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {isDemoMode() && (
+            <p className="shrink-0 border-b border-accent/30 bg-accent-muted px-4 py-1.5 text-center text-xs text-accent">
+              Sample demo — live hosting needs support to cover cost. Email {OWNER_EMAIL} for a real
+              walkthrough.
+            </p>
+          )}
           <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line/40 bg-surface/18 px-4 py-3 backdrop-blur-md sm:px-5">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <BackButton />

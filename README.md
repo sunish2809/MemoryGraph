@@ -515,6 +515,19 @@ reports ready, so the stack comes up in a usable state on the first try.
 
 Requires JDK 21+, Maven and Node 20+.
 
+### Interview demo (no backend)
+
+From the login screen choose **Try demo**, or:
+
+```bash
+cd Frontend
+npm install
+npm run demo
+```
+
+That opens a sample archive in the browser (illustrated people, Bhutan trip, Ask). A note explains
+that live hosting costs money and points visitors to `sunish.5186@gmail.com` for a real demo.
+
 ```bash
 # 1. Database only
 docker compose up -d db

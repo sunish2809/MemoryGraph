@@ -7,6 +7,8 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Panel } from '@/components/ui/Panel'
 import { TextField } from '@/components/ui/TextField'
+import { DemoHostNotice } from '@/demo/DemoHostNotice'
+import { isDemoMode } from '@/demo/isDemoMode'
 import { accountApi } from '@/features/account/accountApi'
 import { useAuth } from '@/features/auth/useAuth'
 import { ApiRequestError } from '@/lib/ApiRequestError'
@@ -54,6 +56,7 @@ export function PrivacyPage() {
 
   return (
     <ScrollPage>
+      {isDemoMode() && <DemoHostNotice />}
       <header>
         <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Privacy</h1>
         <p className="mt-1 max-w-2xl text-sm text-fg-muted">

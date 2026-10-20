@@ -1,5 +1,7 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 
+import { handleDemoBlob, handleDemoRequest } from '@/demo/demoApi'
+import { isDemoMode } from '@/demo/isDemoMode'
 import { ApiRequestError } from '@/lib/ApiRequestError'
 import { touchSessionActivity } from '@/lib/idleSession'
 import { clearSession, readAccessToken } from '@/lib/session'
@@ -74,6 +76,9 @@ function toApiRequestError(error: unknown): ApiRequestError {
  * as success so mutations still run {@code onSuccess} and the UI can refresh.
  */
 async function request<T>(config: AxiosRequestConfig): Promise<T> {
+  if (isDemoMode()) {
+    return handleDemoRequest<T>(config)
+  }
   try {
     const response = await http.request<ApiEnvelope<T> | '' | null>(config)
     if (response.status === 204 || response.data == null || response.data === '') {
@@ -99,6 +104,9 @@ async function request<T>(config: AxiosRequestConfig): Promise<T> {
  * as an {@link ApiRequestError}, but the body is read as a blob rather than parsed.
  */
 async function requestBlob(url: string, config?: AxiosRequestConfig): Promise<Blob> {
+  if (isDemoMode()) {
+    return handleDemoBlob(url)
+  }
   try {
     const response = await http.request<Blob>({ ...config, method: 'GET', url, responseType: 'blob' })
     return response.data
